@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -235,7 +235,11 @@ static int westcos_pkcs15init_generate_key(sc_profile_t *profile,
 		return SC_ERROR_NOT_SUPPORTED;
 	}
 
+#if OPENSSL_VERSION_NUMBER < 0x30000000L
 	pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
+#else
+	pctx = EVP_PKEY_CTX_new_from_name(profile->card->ctx->ossl3ctx->libctx, "RSA", NULL);
+#endif
 	mem = BIO_new(BIO_s_mem());
 	bn = BN_new();
 	if (pctx == NULL || mem == NULL || bn == NULL) {
@@ -246,8 +250,18 @@ static int westcos_pkcs15init_generate_key(sc_profile_t *profile,
 	if (BN_set_word(bn, RSA_F4) != 1 ||
 	    EVP_PKEY_keygen_init(pctx) != 1 ||
 	    EVP_PKEY_CTX_set_rsa_keygen_bits(pctx, key_info->modulus_length) != 1 ||
-	    EVP_PKEY_CTX_set1_rsa_keygen_pubexp(pctx, bn) != 1 ||
-	    EVP_PKEY_keygen(pctx, &key) != 1) {
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+	    EVP_PKEY_CTX_set1_rsa_keygen_pubexp(pctx, bn) != 1) {
+#else
+	    EVP_PKEY_CTX_set_rsa_keygen_pubexp(pctx, bn) != 1) {
+#endif
+		r = SC_ERROR_UNKNOWN;
+		goto out;
+	}
+#if OPENSSL_VERSION_NUMBER < 0x30000000L
+	bn = NULL; /* pctx will free bn */
+#endif
+	if (EVP_PKEY_keygen(pctx, &key) != 1) {
 		r = SC_ERROR_UNKNOWN;
 		goto out;
 	}
@@ -313,6 +327,7 @@ out:
 		BIO_free(mem);
 	if(bn)
 		BN_free(bn);
+	EVP_PKEY_CTX_free(pctx);
 	EVP_PKEY_free(key);
 	sc_file_free(prkf);
 	return r;

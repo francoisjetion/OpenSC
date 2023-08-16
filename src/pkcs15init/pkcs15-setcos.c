@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -181,10 +181,13 @@ setcos_select_pin_reference(sc_profile_t *profile, sc_pkcs15_card_t *p15card,
 	/* sc_pkcs15init_create_pin() starts checking if -1 is an acceptable
 	 * pin reference, which isn't for the SetCOS cards. And since the
 	 * value 1 has been assigned to the SO pin, we'll jump to 2. */
-	else if (auth_info->attrs.pin.reference <= 0)
+	else if (auth_info->attrs.pin.reference <= 0) {
+		if (auth_info_prof.attrs.pin.reference != 1)
+			return SC_ERROR_INVALID_PIN_REFERENCE;
 		auth_info->attrs.pin.reference = auth_info_prof.attrs.pin.reference + 1;
+	}
 
-	return 0;
+	return SC_SUCCESS;
 }
 
 /*
@@ -345,20 +348,23 @@ setcos_create_key(sc_profile_t *profile, sc_pkcs15_card_t *p15card,
 		file->size = 512;
 
 	/* Replace the path of instantiated key template by the path from the object data. */
-        memcpy(&file->path, &key_info->path, sizeof(file->path));
-        file->id = file->path.value[file->path.len - 2] * 0x100
-		+ file->path.value[file->path.len - 1];
+	memcpy(&file->path, &key_info->path, sizeof(file->path));
+	file->id = file->path.value[file->path.len - 2] * 0x100
+	+ file->path.value[file->path.len - 1];
 
 	key_info->key_reference = file->path.value[file->path.len - 1] & 0xFF;
 
-        sc_log(ctx,  "Path of private key file to create %s\n", sc_print_path(&file->path));
+	sc_log(ctx,  "Path of private key file to create %s\n", sc_print_path(&file->path));
 
-        r = sc_select_file(p15card->card, &file->path, NULL);
-        if (!r)   {
+	r = sc_select_file(p15card->card, &file->path, NULL);
+	if (!r)   {
 		r = sc_pkcs15init_delete_by_path(profile, p15card, &file->path);
+		if (r != SC_SUCCESS)
+			sc_file_free(file);
 		LOG_TEST_RET(ctx, r, "Failed to delete private key file");
 	}
         else if (r != SC_ERROR_FILE_NOT_FOUND)    {
+		sc_file_free(file);
 		LOG_TEST_RET(ctx, r, "Select private key file error");
 	}
 

@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #include "config.h"
 
@@ -269,6 +269,7 @@ static void print_cert_info(const struct sc_pkcs15_object *obj)
 	struct sc_pkcs15_cert_info *cert_info = (struct sc_pkcs15_cert_info *) obj->data;
 	struct sc_pkcs15_cert *cert_parsed = NULL;
 	int rv;
+	int private_obj;
 
 	if (compact) {
 		printf("\tPath:%s  ID:%s", sc_print_path(&cert_info->path),
@@ -286,7 +287,8 @@ static void print_cert_info(const struct sc_pkcs15_object *obj)
 
 	print_access_rules(obj->access_rules, SC_PKCS15_MAX_ACCESS_RULES);
 
-	rv = sc_pkcs15_read_certificate(p15card, cert_info, &cert_parsed);
+	private_obj = obj->flags & SC_PKCS15_CO_FLAG_PRIVATE;
+	rv = sc_pkcs15_read_certificate(p15card, cert_info, private_obj, &cert_parsed);
 	if (rv >= 0 && cert_parsed)   {
 		printf("\tEncoded serial : %02X %02X ", *(cert_parsed->serial), *(cert_parsed->serial + 1));
 		util_hex_dump(stdout, cert_parsed->serial + 2, cert_parsed->serial_len - 2, "");
@@ -431,13 +433,15 @@ static int read_certificate(void)
 	for (i = 0; i < count; i++) {
 		struct sc_pkcs15_cert_info *cinfo = (struct sc_pkcs15_cert_info *) objs[i]->data;
 		struct sc_pkcs15_cert *cert;
+		int private_obj;
 
 		if (sc_pkcs15_compare_id(&id, &cinfo->id) != 1)
 			continue;
 
 		if (verbose)
 			printf("Reading certificate with ID '%s'\n", opt_cert);
-		r = sc_pkcs15_read_certificate(p15card, cinfo, &cert);
+		private_obj = objs[i]->flags & SC_PKCS15_CO_FLAG_PRIVATE;
+		r = sc_pkcs15_read_certificate(p15card, cinfo, private_obj, &cert);
 		if (r) {
 			fprintf(stderr, "Certificate read failed: %s\n", sc_strerror(r));
 			return 1;
@@ -466,6 +470,7 @@ static int read_data_object(void)
 	for (i = 0; i < count; i++) {
 		struct sc_pkcs15_data_info *cinfo = (struct sc_pkcs15_data_info *) objs[i]->data;
 		struct sc_pkcs15_data *data_object = NULL;
+		int private_obj;
 
 		if (!sc_format_oid(&oid, opt_data))   {
 			if (!sc_compare_oid(&oid, &cinfo->app_oid))
@@ -480,7 +485,8 @@ static int read_data_object(void)
 			printf("Reading data object with label '%s'\n", opt_data);
 		r = authenticate(objs[i]);
 		if (r >= 0) {
-			r = sc_pkcs15_read_data_object(p15card, cinfo, &data_object);
+			private_obj = objs[i]->flags & SC_PKCS15_CO_FLAG_PRIVATE;
+			r = sc_pkcs15_read_data_object(p15card, cinfo, private_obj, &data_object);
 			if (r) {
 				fprintf(stderr, "Data object read failed: %s\n", sc_strerror(r));
 				if (r == SC_ERROR_FILE_NOT_FOUND)
@@ -527,7 +533,8 @@ static int list_data_objects(void)
 			}
 			if (objs[i]->auth_id.len == 0) {
 				struct sc_pkcs15_data *data_object;
-				r = sc_pkcs15_read_data_object(p15card, cinfo, &data_object);
+				int private_obj = objs[i]->flags & SC_PKCS15_CO_FLAG_PRIVATE;
+				r = sc_pkcs15_read_data_object(p15card, cinfo, private_obj, &data_object);
 				if (r) {
 					fprintf(stderr, "Data object read failed: %s\n", sc_strerror(r));
 					if (r == SC_ERROR_FILE_NOT_FOUND)
@@ -559,7 +566,8 @@ static int list_data_objects(void)
 		printf("\tPath:            %s\n", sc_print_path(&cinfo->path));
 		if (objs[i]->auth_id.len == 0) {
 			struct sc_pkcs15_data *data_object;
-			r = sc_pkcs15_read_data_object(p15card, cinfo, &data_object);
+			int private_obj = objs[i]->flags & SC_PKCS15_CO_FLAG_PRIVATE;
+			r = sc_pkcs15_read_data_object(p15card, cinfo, private_obj, &data_object);
 			if (r) {
 				fprintf(stderr, "Data object read failed: %s\n", sc_strerror(r));
 				if (r == SC_ERROR_FILE_NOT_FOUND)
@@ -802,11 +810,13 @@ static int read_public_key(void)
 		r = sc_pkcs15_read_pubkey(p15card, obj, &pubkey);
 	} else if (r == SC_ERROR_OBJECT_NOT_FOUND) {
 		/* No pubkey - try if there's a certificate */
+		int private_obj;
 		r = sc_pkcs15_find_cert_by_id(p15card, &id, &obj);
 		if (r >= 0) {
 			if (verbose)
 				printf("Reading certificate with ID '%s'\n", opt_pubkey);
-			r = sc_pkcs15_read_certificate(p15card, (sc_pkcs15_cert_info_t *) obj->data, &cert);
+			private_obj = obj->flags & SC_PKCS15_CO_FLAG_PRIVATE;
+			r = sc_pkcs15_read_certificate(p15card, (sc_pkcs15_cert_info_t *) obj->data, private_obj, &cert);
 		}
 		if (r >= 0)
 			pubkey = cert->key;
@@ -976,11 +986,13 @@ static int read_ssh_key(void)
 	}
 	else if (r == SC_ERROR_OBJECT_NOT_FOUND) {
 		/* No pubkey - try if there's a certificate */
+		int private_obj;
 		r = sc_pkcs15_find_cert_by_id(p15card, &id, &obj);
 		if (r >= 0) {
 			if (verbose)
 				fprintf(stderr,"Reading certificate with ID '%s'\n", opt_pubkey);
-			r = sc_pkcs15_read_certificate(p15card, (sc_pkcs15_cert_info_t *) obj->data, &cert);
+			private_obj = obj->flags & SC_PKCS15_CO_FLAG_PRIVATE;
+			r = sc_pkcs15_read_certificate(p15card, (sc_pkcs15_cert_info_t *) obj->data, private_obj, &cert);
 		}
 		if (r >= 0)
 			pubkey = cert->key;
@@ -1377,7 +1389,7 @@ static int test_session_pin(void)
 	unsigned int  auth_method;
 	unsigned char		*pin;
 	int r;
-	unsigned char sessionpin[SC_MAX_PIN_SIZE];
+	unsigned char sessionpin[SC_MAX_PIN_SIZE] = {0};
 	size_t sessionpinlen = sizeof sessionpin;
 
 	if (!opt_auth_id)   {
@@ -1575,6 +1587,7 @@ static int list_pins(void)
 		printf("Card has %d Authentication object(s).\n\n", r);
 
 	for (i = 0; i < r; i++) {
+		sc_pkcs15_get_pin_info(p15card, objs[i]);
 		print_pin_info(objs[i]);
 		printf("\n");
 	}
@@ -1961,8 +1974,11 @@ static int test_update(sc_card_t *in_card)
 			}
 			/* other tag */
 			i += 2 + rbuf[2+i+1]; /* length of this tag*/
+			if (2+i+1 >= apdu.resplen) {
+				break;
+			}
 		}
-		if (rbuf[2+i+1] < 9 || 2+i+2+9 > apdu.resplen) {
+		if (2+i+1 >= apdu.resplen || rbuf[2+i+1] < 9 || 2+i+2+9 > apdu.resplen) {
 			printf("select file returned short fci\n");
 			goto bad_fci;
 		}
@@ -2161,6 +2177,8 @@ int main(int argc, char *argv[])
 			memset(&ctx_param, 0, sizeof(ctx_param));
 			ctx_param.ver      = 0;
 			ctx_param.app_name = app_name;
+			if (verbose)
+				ctx_param.debug_file = stderr;
 
 			if (SC_SUCCESS == sc_context_create(&ctx, &ctx_param)) {
 				/* attempt to connect reader, on error, -r is used for read-certificate operation */
@@ -2344,6 +2362,9 @@ int main(int argc, char *argv[])
 	memset(&ctx_param, 0, sizeof(ctx_param));
 	ctx_param.ver      = 0;
 	ctx_param.app_name = app_name;
+	ctx_param.debug    = verbose;
+	if (verbose)
+		ctx_param.debug_file = stderr;
 
 	r = sc_context_create(&ctx, &ctx_param);
 	if (r) {
@@ -2357,7 +2378,7 @@ int main(int argc, char *argv[])
 		action_count--;
 	}
 
-	err = util_connect_card_ex(ctx, &card, opt_reader, opt_wait, 0, verbose);
+	err = util_connect_card_ex(ctx, &card, opt_reader, opt_wait, 0);
 	if (err)
 		goto end;
 
@@ -2370,7 +2391,8 @@ int main(int argc, char *argv[])
 		aid.len = sizeof(aid.value);
 		if (sc_hex_to_bin(opt_bind_to_aid, aid.value, &aid.len))   {
 			fprintf(stderr, "Invalid AID value: '%s'\n", opt_bind_to_aid);
-			return 1;
+			err = 1;
+			goto end;
 		}
 
 		r = sc_pkcs15_bind(card, &aid, &p15card);

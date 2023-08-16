@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -351,6 +351,12 @@ int sc_pkcs15_decode_pukdf_entry(struct sc_pkcs15_card *p15card,
 err:
 	if (r < 0) {
 		sc_pkcs15_free_pubkey_info(info);
+		if (der->len) {
+			free(der->value);
+			/* der points to obj->content */
+			obj->content.value = NULL;
+			obj->content.len = 0;
+		}
 	}
 
 	LOG_FUNC_RETURN(ctx, r);
@@ -638,7 +644,7 @@ sc_pkcs15_decode_pubkey_ec(sc_context_t *ctx,
 		const u8 *buf, size_t buflen)
 {
 	int r;
-	u8 * ecpoint_data;
+	u8 * ecpoint_data = NULL;
 	size_t ecpoint_len;
 	struct sc_asn1_entry asn1_ec_pointQ[C_ASN1_EC_POINTQ_SIZE];
 
@@ -646,11 +652,15 @@ sc_pkcs15_decode_pubkey_ec(sc_context_t *ctx,
 	sc_copy_asn1_entry(c_asn1_ec_pointQ, asn1_ec_pointQ);
 	sc_format_asn1_entry(asn1_ec_pointQ + 0, &ecpoint_data, &ecpoint_len, 1);
 	r = sc_asn1_decode(ctx, asn1_ec_pointQ, buf, buflen, NULL, NULL);
-	if (r < 0)
+	if (r < 0) {
+		free(ecpoint_data);
 		LOG_TEST_RET(ctx, r, "ASN.1 decoding failed");
+	}
 
-	if (ecpoint_len == 0 || *ecpoint_data != 0x04)
+	if (ecpoint_len == 0 || *ecpoint_data != 0x04) {
+		free(ecpoint_data);
 		LOG_TEST_RET(ctx, SC_ERROR_NOT_SUPPORTED, "Supported only uncompressed EC pointQ value");
+	}
 
 	key->ecpointQ.len = ecpoint_len;
 	key->ecpointQ.value = ecpoint_data;
@@ -879,6 +889,7 @@ sc_pkcs15_read_pubkey(struct sc_pkcs15_card *p15card, const struct sc_pkcs15_obj
 	unsigned char *data = NULL;
 	size_t	len;
 	int	algorithm, r;
+	int	private_obj;
 
 	if (p15card == NULL || p15card->card == NULL || p15card->card->ops == NULL
 			|| obj == NULL || out == NULL) {
@@ -947,7 +958,8 @@ sc_pkcs15_read_pubkey(struct sc_pkcs15_card *p15card, const struct sc_pkcs15_obj
 	}
 	else if (info->path.len)   {
 		sc_log(ctx, "Read from EF and decode");
-		r = sc_pkcs15_read_file(p15card, &info->path, &data, &len);
+		private_obj = obj->flags & SC_PKCS15_CO_FLAG_PRIVATE;
+		r = sc_pkcs15_read_file(p15card, &info->path, &data, &len, private_obj);
 		LOG_TEST_GOTO_ERR(ctx, r, "Failed to read public key file.");
 
 		if ((algorithm == SC_ALGORITHM_EC || algorithm == SC_ALGORITHM_EDDSA || algorithm == SC_ALGORITHM_XEDDSA)
@@ -1644,10 +1656,17 @@ sc_pkcs15_convert_pubkey(struct sc_pkcs15_pubkey *pkcs15_key, void *evp_key)
 		EC_POINT *point = NULL;
 		EC_GROUP *group = NULL;
 		int nid = 0;
-		unsigned char *pub = NULL; size_t pub_len = 0;
-		char *group_name = NULL; size_t group_name_len = 0;
-		EVP_PKEY_get_octet_string_param(pk, OSSL_PKEY_PARAM_PUB_KEY, NULL, 0, &pub_len);
-		EVP_PKEY_get_group_name(pk, NULL, 0, &group_name_len);
+		unsigned char *pub = NULL;
+		size_t pub_len = 0;
+		char *group_name = NULL;
+		size_t group_name_len = 0;
+
+		if (EVP_PKEY_get_octet_string_param(pk, OSSL_PKEY_PARAM_PUB_KEY, NULL, 0, &pub_len) != 1) {
+			return SC_ERROR_INTERNAL;
+		}
+		if (EVP_PKEY_get_group_name(pk, NULL, 0, &group_name_len) != 1) {
+			return SC_ERROR_INTERNAL;
+		}
 		if (!(pub = malloc(pub_len)) || !(group_name = malloc(group_name_len))) {
 			free(pub);
 			return SC_ERROR_OUT_OF_MEMORY;
@@ -1674,7 +1693,7 @@ sc_pkcs15_convert_pubkey(struct sc_pkcs15_pubkey *pkcs15_key, void *evp_key)
 		X = BN_new();
 		Y = BN_new();
 		if (X && Y && group)
-				r = EC_POINT_get_affine_coordinates_GFp(group, point, X, Y, NULL);
+				r = EC_POINT_get_affine_coordinates(group, point, X, Y, NULL);
 		if (r == 1) {
 			dst->xy.len = BN_num_bytes(X) + BN_num_bytes(Y);
 			dst->xy.data = malloc(dst->xy.len);
@@ -1735,7 +1754,7 @@ sc_pkcs15_convert_pubkey(struct sc_pkcs15_pubkey *pkcs15_key, void *evp_key)
 		if (EVP_PKEY_get_group_name(pk, group_name, sizeof(group_name), NULL) != 1)
 			return SC_ERROR_INTERNAL;
 		dst->params.named_curve = strdup(group_name);
-		
+
 		/* Decode EC_POINT from a octet string */
 		if (EVP_PKEY_get_octet_string_param(pk, OSSL_PKEY_PARAM_ENCODED_PUBLIC_KEY, buf, buflen, &buflen) != 1) {
 			return SC_ERROR_INCOMPATIBLE_KEY;

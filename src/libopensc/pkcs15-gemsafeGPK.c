@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -271,7 +271,7 @@ static int sc_pkcs15emu_gemsafeGPK_init(sc_pkcs15_card_t *p15card)
 		r = sc_select_file(card, &path, NULL);
 		if (r < 0) 
 			continue;
-		r = sc_read_record(card, 1, sysrec, sizeof(sysrec), SC_RECORD_BY_REC_NR);
+		r = sc_read_record(card, 1, 0, sysrec, sizeof(sysrec), SC_RECORD_BY_REC_NR);
 		if (r != 7 || sysrec[0] != 0) {
 			continue;
 		}
@@ -292,7 +292,7 @@ static int sc_pkcs15emu_gemsafeGPK_init(sc_pkcs15_card_t *p15card)
 		sc_pkcs15_format_id("", &kinfo[num_keyinfo].id); 
 
 		sc_log(card->ctx, "reading modulus");
-		r = sc_read_record(card, 2, modulus_buf, 
+		r = sc_read_record(card, 2, 0, modulus_buf, 
 				kinfo[num_keyinfo].modulus_len+1, SC_RECORD_BY_REC_NR);
 		if (r < 0) 
 			continue;
@@ -345,6 +345,7 @@ static int sc_pkcs15emu_gemsafeGPK_init(sc_pkcs15_card_t *p15card)
 		struct sc_pkcs15_cert_info cert_info;
 		struct sc_pkcs15_object    cert_obj;
 		sc_pkcs15_cert_t 		*cert_out;
+		int private_obj;
 
 		memset(&cert_info, 0, sizeof(cert_info));
 		memset(&cert_obj,  0, sizeof(cert_obj));
@@ -410,8 +411,8 @@ static int sc_pkcs15emu_gemsafeGPK_init(sc_pkcs15_card_t *p15card)
 		}
 
 		/* now lets see if we have a matching key for this cert */
-		
-		r = sc_pkcs15_read_certificate(p15card, &cert_info, &cert_out);
+		private_obj = cert_obj.flags & SC_PKCS15_CO_FLAG_PRIVATE;
+		r = sc_pkcs15_read_certificate(p15card, &cert_info, private_obj, &cert_out);
 		if (r < 0) {
 			free(gsdata);
 			sc_pkcs15_card_clear(p15card);

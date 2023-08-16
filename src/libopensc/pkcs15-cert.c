@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -367,7 +367,7 @@ sc_pkcs15_pubkey_from_cert(struct sc_context *ctx,
 
 int
 sc_pkcs15_read_certificate(struct sc_pkcs15_card *p15card, const struct sc_pkcs15_cert_info *info,
-		struct sc_pkcs15_cert **cert_out)
+		int private_obj, struct sc_pkcs15_cert **cert_out)
 {
 	struct sc_context *ctx = NULL;
 	struct sc_pkcs15_cert *cert = NULL;
@@ -384,7 +384,7 @@ sc_pkcs15_read_certificate(struct sc_pkcs15_card *p15card, const struct sc_pkcs1
 		sc_der_copy(&der, &info->value);
 	}
 	else if (info->path.len) {
-		r = sc_pkcs15_read_file(p15card, &info->path, &der.value, &der.len);
+		r = sc_pkcs15_read_file(p15card, &info->path, &der.value, &der.len, private_obj);
 		LOG_TEST_RET(ctx, r, "Unable to read certificate file.");
 	}
 	else   {

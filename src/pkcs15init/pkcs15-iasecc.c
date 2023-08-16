@@ -17,7 +17,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifdef HAVE_CONFIG_H
@@ -125,7 +125,7 @@ iasecc_pkcs15_erase_card(struct sc_profile *profile, struct sc_pkcs15_card *p15c
 
 	LOG_FUNC_CALLED(ctx);
 
-	if (p15card->app->ddo.aid.len)   {
+	if (p15card->app && p15card->app->ddo.aid.len)   {
 		memset(&path, 0, sizeof(struct sc_path));
 		path.type = SC_PATH_TYPE_DF_NAME;
 		memcpy(path.value, p15card->app->ddo.aid.value, p15card->app->ddo.aid.len);
@@ -1473,7 +1473,7 @@ iasecc_md_gemalto_unset_default(struct sc_pkcs15_card *p15card, struct sc_profil
 	struct sc_pkcs15_prkey_info *key_info = (struct sc_pkcs15_prkey_info *)key_obj->data;
 	unsigned char guid[40];
 	size_t guid_len;
-	int rv, ii, keys_num;
+	int rv, ii, keys_num, private_obj;
 
 	LOG_FUNC_CALLED(ctx);
 
@@ -1487,7 +1487,8 @@ iasecc_md_gemalto_unset_default(struct sc_pkcs15_card *p15card, struct sc_profil
 	if (rv == SC_ERROR_OBJECT_NOT_FOUND)
 		LOG_FUNC_RETURN(ctx, SC_SUCCESS);
 
-	rv = sc_pkcs15_read_data_object(p15card, (struct sc_pkcs15_data_info *)data_obj->data, &dod);
+	private_obj = data_obj->flags & SC_PKCS15_CO_FLAG_PRIVATE;
+	rv = sc_pkcs15_read_data_object(p15card, (struct sc_pkcs15_data_info *)data_obj->data, private_obj, &dod);
 	LOG_TEST_RET(ctx, rv, "Cannot read from 'CSP/'Default Key Container'");
 
 	if (guid_len != dod->data_len || memcmp(guid, dod->data, guid_len)) {
@@ -1745,10 +1746,11 @@ iasecc_store_data_object(struct sc_pkcs15_card *p15card, struct sc_profile *prof
 		if (ii == nn_objs)
 			break;
 		sc_file_free(file);
+		file = NULL;
 	}
 
 	if (indx == MAX_DATA_OBJS)
-		LOG_TEST_RET(ctx, SC_ERROR_TOO_MANY_OBJECTS, "iasecc_store_data_object() too many DATA objects.");
+		LOG_TEST_GOTO_ERR(ctx, SC_ERROR_TOO_MANY_OBJECTS, "iasecc_store_data_object() too many DATA objects.");
 
 	do  {
 		const struct sc_acl_entry *acl;
@@ -1776,43 +1778,43 @@ iasecc_store_data_object(struct sc_pkcs15_card *p15card, struct sc_profile *prof
 	} while(0);
 
 	rv = iasecc_file_convert_acls(ctx, profile, file);
-	LOG_TEST_RET(ctx, rv, "iasecc_store_data_object() cannot convert profile ACLs");
+	LOG_TEST_GOTO_ERR(ctx, rv, "iasecc_store_data_object() cannot convert profile ACLs");
 
 	rv = sc_profile_get_parent(profile, "public-data", &parent);
-	LOG_TEST_RET(ctx, rv, "iasecc_store_data_object() cannot get object parent");
+	LOG_TEST_GOTO_ERR(ctx, rv, "iasecc_store_data_object() cannot get object parent");
 	sc_log(ctx, "iasecc_store_data_object() parent path '%s'\n", sc_print_path(&parent->path));
 
 	rv = sc_select_file(card, &parent->path, NULL);
-	LOG_TEST_RET(ctx, rv, "iasecc_store_data_object() cannot select parent");
+	LOG_TEST_GOTO_ERR(ctx, rv, "iasecc_store_data_object() cannot select parent");
 
 	rv = sc_select_file(card, &file->path, &cfile);
 	if (!rv)   {
 		rv = sc_pkcs15init_authenticate(profile, p15card, cfile, SC_AC_OP_DELETE);
-		LOG_TEST_RET(ctx, rv, "iasecc_store_data_object() DELETE authentication failed");
+		LOG_TEST_GOTO_ERR(ctx, rv, "iasecc_store_data_object() DELETE authentication failed");
 
 		rv = iasecc_pkcs15_delete_file(p15card, profile, cfile);
-		LOG_TEST_RET(ctx, rv, "s_pkcs15init_store_data_object() delete pkcs15 file error");
+		LOG_TEST_GOTO_ERR(ctx, rv, "s_pkcs15init_store_data_object() delete pkcs15 file error");
 	}
 	else if (rv != SC_ERROR_FILE_NOT_FOUND)   {
-		LOG_TEST_RET(ctx, rv, "iasecc_store_data_object() select file error");
+		LOG_TEST_GOTO_ERR(ctx, rv, "iasecc_store_data_object() select file error");
 	}
 
 	rv = sc_pkcs15init_authenticate(profile, p15card, parent, SC_AC_OP_CREATE);
-	LOG_TEST_RET(ctx, rv, "iasecc_store_data_object() parent CREATE authentication failed");
+	LOG_TEST_GOTO_ERR(ctx, rv, "iasecc_store_data_object() parent CREATE authentication failed");
 
 	file->size = data->len;
 	rv = sc_create_file(card, file);
-	LOG_TEST_RET(ctx, rv, "iasecc_store_data_object() cannot create DATA file");
+	LOG_TEST_GOTO_ERR(ctx, rv, "iasecc_store_data_object() cannot create DATA file");
 
 	rv = sc_pkcs15init_authenticate(profile, p15card, file, SC_AC_OP_UPDATE);
-	LOG_TEST_RET(ctx, rv, "iasecc_store_data_object() data file UPDATE authentication failed");
+	LOG_TEST_GOTO_ERR(ctx, rv, "iasecc_store_data_object() data file UPDATE authentication failed");
 
 	rv = sc_update_binary(card, 0, data->value, data->len, 0);
-	LOG_TEST_RET(ctx, rv, "iasecc_store_data_object() update DATA file failed");
+	LOG_TEST_GOTO_ERR(ctx, rv, "iasecc_store_data_object() update DATA file failed");
 
 	if (path)
 		*path = file->path;
-
+err:
 	sc_file_free(parent);
 	sc_file_free(file);
 	sc_file_free(cfile);

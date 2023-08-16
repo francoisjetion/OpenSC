@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -37,10 +37,18 @@
 #include <io.h>
 #endif
 
+#ifdef __APPLE__
+#include <libproc.h>
+#endif
+
 #include "common/libscdl.h"
 #include "common/compat_strlcpy.h"
 #include "internal.h"
+#ifdef ENABLE_OPENSSL
+#include <openssl/crypto.h>
 #include "sc-ossl-compat.h"
+#endif
+
 
 static int ignored_reader(sc_context_t *ctx, sc_reader_t *reader)
 {
@@ -94,6 +102,10 @@ struct _sc_driver_entry {
 };
 
 static const struct _sc_driver_entry internal_card_drivers[] = {
+	/* The card handled by skeid shares the ATR with other cards running CardOS 5.4.
+	 * In order to prevent the cardos driver from matching skeid cards, skeid driver
+	 * precedes cardos and matches no other CardOS 5.4 card. */
+	{ "skeid",	(void *(*)(void)) sc_get_skeid_driver },
 	{ "cardos",	(void *(*)(void)) sc_get_cardos_driver },
 	{ "cyberflex",	(void *(*)(void)) sc_get_cyberflex_driver },
 	{ "gemsafeV1",	(void *(*)(void)) sc_get_gemsafeV1_driver },
@@ -146,6 +158,9 @@ static const struct _sc_driver_entry internal_card_drivers[] = {
 	{ "npa",	(void *(*)(void)) sc_get_npa_driver },
 	{ "cac1",	(void *(*)(void)) sc_get_cac1_driver },
 	{ "nqapplet",	(void *(*)(void)) sc_get_nqApplet_driver },
+#if defined(ENABLE_SM) && defined(ENABLE_OPENPACE)
+	{ "eOI",	(void *(*)(void)) sc_get_eoi_driver },
+#endif
 	/* The default driver should be last, as it handles all the
 	 * unrecognized cards. */
 	{ "default",	(void *(*)(void)) sc_get_default_driver },
@@ -721,6 +736,10 @@ static void process_config_file(sc_context_t *ctx, struct _sc_ctx_options *opts)
 	}
 	/* needs to be after the log file is known */
 	sc_log(ctx, "Used configuration file '%s'", conf_path);
+	blocks = scconf_find_blocks(ctx->conf, NULL, "app", ctx->exe_path);
+	if (blocks && blocks[0])
+		ctx->conf_blocks[count++] = blocks[0];
+	free(blocks);
 	blocks = scconf_find_blocks(ctx->conf, NULL, "app", ctx->app_name);
 	if (blocks && blocks[0])
 		ctx->conf_blocks[count++] = blocks[0];
@@ -731,7 +750,7 @@ static void process_config_file(sc_context_t *ctx, struct _sc_ctx_options *opts)
 			ctx->conf_blocks[count] = blocks[0];
 		free(blocks);
 	}
-	/* Above we add 2 blocks at most, but conf_blocks has 3 elements,
+	/* Above we add 3 blocks at most, but conf_blocks has 4 elements,
 	 * so at least one is NULL */
 	for (i = 0; ctx->conf_blocks[i]; i++)
 		load_parameters(ctx, ctx->conf_blocks[i], opts);
@@ -800,6 +819,82 @@ int sc_context_repair(sc_context_t **ctx_out)
 	return SC_SUCCESS;
 }
 
+#ifdef USE_OPENSSL3_LIBCTX
+static int sc_openssl3_init(sc_context_t *ctx)
+{
+	ctx->ossl3ctx = calloc(1, sizeof(ossl3ctx_t));
+	if (ctx->ossl3ctx == NULL)
+		return SC_ERROR_OUT_OF_MEMORY;
+	ctx->ossl3ctx->libctx = OSSL_LIB_CTX_new();
+	if (ctx->ossl3ctx->libctx == NULL) {
+		return SC_ERROR_INTERNAL;
+	}
+	ctx->ossl3ctx->defprov = OSSL_PROVIDER_load(ctx->ossl3ctx->libctx,
+						    "default");
+	if (ctx->ossl3ctx->defprov == NULL) {
+		OSSL_LIB_CTX_free(ctx->ossl3ctx->libctx);
+		free(ctx->ossl3ctx);
+		ctx->ossl3ctx = NULL;
+		return SC_ERROR_INTERNAL;
+	}
+	ctx->ossl3ctx->legacyprov = OSSL_PROVIDER_load(ctx->ossl3ctx->libctx,
+						       "legacy");
+	if (ctx->ossl3ctx->legacyprov == NULL) {
+		sc_log(ctx, "Failed to load OpenSSL Legacy provider");
+	}
+	return SC_SUCCESS;
+}
+
+static void sc_openssl3_deinit(sc_context_t *ctx)
+{
+	if (ctx->ossl3ctx == NULL)
+		return;
+	if (ctx->ossl3ctx->legacyprov)
+		OSSL_PROVIDER_unload(ctx->ossl3ctx->legacyprov);
+	if (ctx->ossl3ctx->defprov)
+		OSSL_PROVIDER_unload(ctx->ossl3ctx->defprov);
+	if (ctx->ossl3ctx->libctx)
+		OSSL_LIB_CTX_free(ctx->ossl3ctx->libctx);
+	free(ctx->ossl3ctx);
+	ctx->ossl3ctx = NULL;
+}
+#endif
+
+static char *get_exe_path()
+{
+	/* Find the executable's path which runs this code.
+	 * See https://github.com/gpakosz/whereami/ for
+	 * potentially more platforms */
+	char exe_path[PATH_MAX] = "unknown executable path";
+	int path_found = 0;
+
+#if   defined(_WIN32)
+	if (0 < GetModuleFileNameA(NULL, exe_path, sizeof exe_path))
+		path_found = 1;
+#elif defined(__APPLE__)
+	if (0 < proc_pidpath(getpid(), exe_path, sizeof exe_path))
+		path_found = 1;
+#elif defined(__linux__) || defined(__CYGWIN__)
+	if (NULL != realpath("/proc/self/exe", exe_path))
+		path_found = 1;
+#endif
+
+#if defined(HAVE_GETPROGNAME)
+	if (!path_found) {
+		/* getprogname is unreliable and typically only returns the basename.
+		 * However, this should be enough for our purposes */
+		const char *prog = getprogname();
+		if (prog)
+			strlcpy(exe_path, prog, sizeof exe_path);
+	}
+#else
+	/* avoid warning "set but not used" */
+	(void) path_found;
+#endif
+
+	return strdup(exe_path);
+}
+
 int sc_context_create(sc_context_t **ctx_out, const sc_context_param_t *parm)
 {
 	sc_context_t		*ctx;
@@ -825,6 +920,12 @@ int sc_context_create(sc_context_t **ctx_out, const sc_context_param_t *parm)
 		return SC_ERROR_OUT_OF_MEMORY;
 	}
 
+	ctx->exe_path = get_exe_path();
+	if (ctx->exe_path == NULL) {
+		sc_release_context(ctx);
+		return SC_ERROR_OUT_OF_MEMORY;
+	}
+
 	ctx->flags = parm->flags;
 	set_defaults(ctx, &opts);
 
@@ -844,15 +945,36 @@ int sc_context_create(sc_context_t **ctx_out, const sc_context_param_t *parm)
 		return r;
 	}
 
-#if defined(ENABLE_OPENSSL) && defined(OPENSSL_SECURE_MALLOC_SIZE)
+#if defined(ENABLE_OPENSSL) && defined(OPENSSL_SECURE_MALLOC_SIZE) && !defined(LIBRESSL_VERSION_NUMBER)
 	if (!CRYPTO_secure_malloc_initialized()) {
 		CRYPTO_secure_malloc_init(OPENSSL_SECURE_MALLOC_SIZE, OPENSSL_SECURE_MALLOC_SIZE/8);
 	}
 #endif
 
 	process_config_file(ctx, &opts);
+
+	/* overwrite with caller's parameters if explicitly given */
+	if (parm->debug) {
+		ctx->debug = parm->debug;
+	}
+	if (parm->debug_file) {
+		if (ctx->debug_file && (ctx->debug_file != stderr && ctx->debug_file != stdout))
+			fclose(ctx->debug_file);
+		ctx->debug_file = parm->debug_file;
+	}
+
 	sc_log(ctx, "==================================="); /* first thing in the log */
-	sc_log(ctx, "opensc version: %s", sc_get_version());
+	sc_log(ctx, "OpenSC version: %s", sc_get_version());
+	sc_log(ctx, "Configured for %s (%s)", ctx->app_name, ctx->exe_path);
+
+#ifdef USE_OPENSSL3_LIBCTX
+	r = sc_openssl3_init(ctx);
+	if (r != SC_SUCCESS) {
+		del_drvs(&opts);
+		sc_release_context(ctx);
+		return r;
+	}
+#endif
 
 #ifdef ENABLE_PCSC
 	ctx->reader_driver = sc_get_pcsc_driver();
@@ -919,7 +1041,6 @@ int sc_wait_for_event(sc_context_t *ctx, unsigned int event_mask, sc_reader_t **
 	return SC_ERROR_NOT_SUPPORTED;
 }
 
-
 int sc_release_context(sc_context_t *ctx)
 {
 	unsigned int i;
@@ -944,6 +1065,9 @@ int sc_release_context(sc_context_t *ctx)
 		if (drv->dll)
 			sc_dlclose(drv->dll);
 	}
+#ifdef USE_OPENSSL3_LIBCTX
+	sc_openssl3_deinit(ctx);
+#endif
 	if (ctx->preferred_language != NULL)
 		free(ctx->preferred_language);
 	if (ctx->mutex != NULL) {
@@ -957,10 +1081,9 @@ int sc_release_context(sc_context_t *ctx)
 		scconf_free(ctx->conf);
 	if (ctx->debug_file && (ctx->debug_file != stdout && ctx->debug_file != stderr))
 		fclose(ctx->debug_file);
-	if (ctx->debug_filename != NULL)
-		free(ctx->debug_filename);
-	if (ctx->app_name != NULL)
-		free(ctx->app_name);
+	free(ctx->debug_filename);
+	free(ctx->app_name);
+	free(ctx->exe_path);
 	list_destroy(&ctx->readers);
 	sc_mem_clear(ctx, sizeof(*ctx));
 	free(ctx);

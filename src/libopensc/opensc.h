@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 /**
@@ -59,7 +59,8 @@ extern "C" {
 #define SC_SEC_OPERATION_DERIVE         0x0004
 #define SC_SEC_OPERATION_WRAP		0x0005
 #define SC_SEC_OPERATION_UNWRAP		0x0006
-
+#define SC_SEC_OPERATION_ENCRYPT_SYM	0x0007
+#define SC_SEC_OPERATION_DECRYPT_SYM	0x0008
 /* sc_security_env flags */
 #define SC_SEC_ENV_ALG_REF_PRESENT	0x0001
 #define SC_SEC_ENV_FILE_REF_PRESENT	0x0002
@@ -651,13 +652,13 @@ struct sc_card_operations {
 	 * @param  idx    index within the file with the data to read
 	 * @param  buf    buffer to the read data
 	 * @param  count  number of bytes to read
-	 * @param  flags  flags for the READ BINARY command (currently not used)
+	 * @param  flags  flags for the READ BINARY command (optional)
 	 * @return number of bytes read or an error code
 	 *
 	 * @see sc_read_binary()
 	 */
 	int (*read_binary)(struct sc_card *card, unsigned int idx,
-			u8 * buf, size_t count, unsigned long flags);
+			u8 * buf, size_t count, unsigned long *flags);
 	/**
 	 * @brief Write data to a binary EF with a single command
 	 *
@@ -705,13 +706,13 @@ struct sc_card_operations {
 	int (*erase_binary)(struct sc_card *card, unsigned int idx,
 			    size_t count, unsigned long flags);
 
-	int (*read_record)(struct sc_card *card, unsigned int rec_nr,
+	int (*read_record)(struct sc_card *card, unsigned int rec_nr, unsigned int idx,
 			   u8 * buf, size_t count, unsigned long flags);
 	int (*write_record)(struct sc_card *card, unsigned int rec_nr,
 			    const u8 * buf, size_t count, unsigned long flags);
 	int (*append_record)(struct sc_card *card, const u8 * buf,
 			     size_t count, unsigned long flags);
-	int (*update_record)(struct sc_card *card, unsigned int rec_nr,
+	int (*update_record)(struct sc_card *card, unsigned int rec_nr, unsigned int idx,
 			     const u8 * buf, size_t count, unsigned long flags);
 
 	/* select_file: Does the equivalent of SELECT FILE command specified
@@ -814,6 +815,11 @@ struct sc_card_operations {
 	int (*wrap)(struct sc_card *card, u8 *out, size_t outlen);
 
 	int (*unwrap)(struct sc_card *card, const u8 *crgram, size_t crgram_len);
+
+	int (*encrypt_sym)(struct sc_card *card, const u8 *plaintext, size_t plaintext_len,
+			u8 *out, size_t *outlen);
+	int (*decrypt_sym)(struct sc_card *card, const u8 *EncryptedData, size_t EncryptedDataLen,
+			u8 *out, size_t *outlen);
 };
 
 typedef struct sc_card_driver {
@@ -861,10 +867,13 @@ typedef struct {
 #define SC_CTX_FLAG_DISABLE_POPUPS			0x00000010
 #define SC_CTX_FLAG_DISABLE_COLORS			0x00000020
 
+typedef struct ossl3ctx ossl3ctx_t;
+
 typedef struct sc_context {
 	scconf_context *conf;
-	scconf_block *conf_blocks[3];
+	scconf_block *conf_blocks[4];
 	char *app_name;
+	char *exe_path;
 	int debug;
 	unsigned long flags;
 
@@ -882,6 +891,10 @@ typedef struct sc_context {
 
 	sc_thread_context_t	*thread_ctx;
 	void *mutex;
+
+#ifdef ENABLE_OPENSSL
+	ossl3ctx_t *ossl3ctx;
+#endif
 
 	unsigned int magic;
 } sc_context_t;
@@ -974,6 +987,8 @@ typedef struct {
 	unsigned long flags;
 	/** mutex functions to use (optional) */
 	sc_thread_context_t *thread_ctx;
+	int debug;
+	FILE *debug_file;
 } sc_context_param_t;
 
 /**
@@ -1238,7 +1253,7 @@ int sc_list_files(struct sc_card *card, u8 *buf, size_t buflen);
  * @return number of bytes read or an error code
  */
 int sc_read_binary(struct sc_card *card, unsigned int idx, u8 * buf,
-		   size_t count, unsigned long flags);
+		   size_t count, unsigned long *flags);
 /**
  * @brief Write data to a binary EF
  *
@@ -1292,13 +1307,14 @@ int sc_erase_binary(struct sc_card *card, unsigned int idx,
  * Reads a record from the current (i.e. selected) file.
  * @param  card    struct sc_card object on which to issue the command
  * @param  rec_nr  SC_READ_RECORD_CURRENT or a record number starting from 1
+ * @param  idx     index within the record with the data to read
  * @param  buf     Pointer to a buffer for storing the data
  * @param  count   Number of bytes to read
  * @param  flags   flags (may contain a short file id of a file to select)
  * @retval number of bytes read or an error value
  */
-int sc_read_record(struct sc_card *card, unsigned int rec_nr, u8 * buf,
-		   size_t count, unsigned long flags);
+int sc_read_record(struct sc_card *card, unsigned int rec_nr, unsigned int idx,
+		   u8 * buf, size_t count, unsigned long flags);
 /**
  * Writes data to a record from the current (i.e. selected) file.
  * @param  card    struct sc_card object on which to issue the command
@@ -1324,13 +1340,14 @@ int sc_append_record(struct sc_card *card, const u8 * buf, size_t count,
  * Updates the data of a record from the current (i.e. selected) file.
  * @param  card    struct sc_card object on which to issue the command
  * @param  rec_nr  SC_READ_RECORD_CURRENT or a record number starting from 1
+ * @param  idx     index within the record with the data to read
  * @param  buf     buffer with to the new data to be written
  * @param  count   number of bytes to update
  * @param  flags   flags (may contain a short file id of a file to select)
  * @retval number of bytes written or an error value
  */
-int sc_update_record(struct sc_card *card, unsigned int rec_nr, const u8 * buf,
-		     size_t count, unsigned long flags);
+int sc_update_record(struct sc_card *card, unsigned int rec_nr, unsigned int idx,
+		     const u8 * buf, size_t count, unsigned long flags);
 int sc_delete_record(struct sc_card *card, unsigned int rec_nr);
 
 /* get/put data functions */
@@ -1378,6 +1395,11 @@ int sc_reset_retry_counter(struct sc_card *card, unsigned int type,
 			   const u8 *newref, size_t newlen);
 int sc_build_pin(u8 *buf, size_t buflen, struct sc_pin_cmd_pin *pin, int pad);
 
+int sc_encrypt_sym(struct sc_card *card, const u8 *Data, size_t DataLen,
+		u8 *out, size_t *outlen);
+
+int sc_decrypt_sym(struct sc_card *card, const u8 *EncryptedData, size_t EncryptedDataLen,
+		u8 *out, size_t *outlen);
 
 /********************************************************************/
 /*               ISO 7816-9 related functions                       */

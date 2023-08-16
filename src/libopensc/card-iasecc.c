@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifdef HAVE_CONFIG_H
@@ -42,6 +42,7 @@
 #include "asn1.h"
 #include "cardctl.h"
 #include "opensc.h"
+#include "sc-ossl-compat.h"
 /* #include "sm.h" */
 #include "pkcs15.h"
 /* #include "hash-strings.h" */
@@ -725,7 +726,7 @@ err:
 
 static int
 iasecc_read_binary(struct sc_card *card, unsigned int offs,
-		unsigned char *buf, size_t count, unsigned long flags)
+		unsigned char *buf, size_t count, unsigned long *flags)
 {
 	struct sc_context *ctx = card->ctx;
 	struct sc_apdu apdu;
@@ -819,7 +820,7 @@ _iasecc_sm_read_binary(struct sc_card *card, unsigned int offs,
 
 		sc_log(ctx, "READ method/reference %X/%X", entry->method, entry->key_ref);
 		if ((entry->method == SC_AC_SCB) && (entry->key_ref & IASECC_SCB_METHOD_SM))   {
-			unsigned char se_num = (entry->method == SC_AC_SCB) ? (entry->key_ref & IASECC_SCB_METHOD_MASK_REF) : 0;
+			unsigned char se_num = entry->key_ref & IASECC_SCB_METHOD_MASK_REF;
 
 			rv = iasecc_sm_read_binary(card, se_num, offs, buff, count);
 			LOG_FUNC_RETURN(ctx, rv);
@@ -854,7 +855,7 @@ _iasecc_sm_update_binary(struct sc_card *card, unsigned int offs,
 
 		sc_log(ctx, "UPDATE method/reference %X/%X", entry->method, entry->key_ref);
 		if (entry->method == SC_AC_SCB && (entry->key_ref & IASECC_SCB_METHOD_SM))   {
-			unsigned char se_num = entry->method == SC_AC_SCB ? entry->key_ref & IASECC_SCB_METHOD_MASK_REF : 0;
+			unsigned char se_num = entry->key_ref & IASECC_SCB_METHOD_MASK_REF;
 
 			rv = iasecc_sm_update_binary(card, se_num, offs, buff, count);
 			LOG_FUNC_RETURN(ctx, rv);
@@ -1558,7 +1559,7 @@ iasecc_delete_file(struct sc_card *card, const struct sc_path *path)
 
 	sc_log(ctx, "DELETE method/reference %X/%X", entry->method, entry->key_ref);
 	if (entry->method == SC_AC_SCB && (entry->key_ref & IASECC_SCB_METHOD_SM))   {
-		unsigned char se_num = (entry->method == SC_AC_SCB) ? (entry->key_ref & IASECC_SCB_METHOD_MASK_REF) : 0;
+		unsigned char se_num = entry->key_ref & IASECC_SCB_METHOD_MASK_REF;
 		rv = iasecc_sm_delete_file(card, se_num, file->id);
 	}
 	else   {
@@ -3164,10 +3165,14 @@ static int
 iasecc_qsign_data_sha1(struct sc_context *ctx, const unsigned char *in, size_t in_len,
 				struct iasecc_qsign_data *out)
 {
-	SHA_CTX sha;
-	SHA_LONG pre_hash_Nl, *hh[5] = {
-		&sha.h0, &sha.h1, &sha.h2, &sha.h3, &sha.h4
-	};
+#if OPENSSL_VERSION_NUMBER < 0x30000000L
+
+	int r = SC_ERROR_INTERNAL;
+	EVP_MD_CTX *mdctx = NULL;
+	EVP_MD *md = NULL;
+	SHA_CTX *md_data = NULL;
+	unsigned int md_out_len;
+	SHA_LONG pre_hash_Nl, *hh[5] = {NULL, NULL, NULL, NULL, NULL};
 	int jj, ii;
 	int hh_size = sizeof(SHA_LONG), hh_num = SHA_DIGEST_LENGTH / sizeof(SHA_LONG);
 
@@ -3181,8 +3186,30 @@ iasecc_qsign_data_sha1(struct sc_context *ctx, const unsigned char *in, size_t i
 	       in_len);
 	memset(out, 0, sizeof(struct iasecc_qsign_data));
 
-	SHA1_Init(&sha);
-	SHA1_Update(&sha, in, in_len);
+	md = sc_evp_md(ctx, "SHA1");
+	mdctx = EVP_MD_CTX_new();
+	if (EVP_DigestInit_ex(mdctx, md, NULL) != 1) {
+		sc_log(ctx, "EVP_DigestInit_ex failed");
+		goto err;
+	}
+	
+	md_data = EVP_MD_CTX_md_data(mdctx);
+	if (md_data == NULL) {
+		sc_log(ctx, "Failed to find md_data");
+		r = SC_ERROR_NOT_SUPPORTED;
+		goto err;
+	}
+
+	if (EVP_DigestUpdate(mdctx, in, in_len) != 1) {
+		sc_log(ctx, "EVP_DigestUpdate failed");
+		goto err;
+	}
+
+	hh[0] = &md_data->h0;
+	hh[1] = &md_data->h1;
+	hh[2] = &md_data->h2;
+	hh[3] = &md_data->h3;
+	hh[4] = &md_data->h4;
 
 	for (jj=0; jj<hh_num; jj++)
 		for(ii=0; ii<hh_size; ii++)
@@ -3190,28 +3217,46 @@ iasecc_qsign_data_sha1(struct sc_context *ctx, const unsigned char *in, size_t i
 	out->pre_hash_size = SHA_DIGEST_LENGTH;
 	sc_log(ctx, "Pre SHA1:%s", sc_dump_hex(out->pre_hash, out->pre_hash_size));
 
-	pre_hash_Nl = sha.Nl - (sha.Nl % (sizeof(sha.data) * 8));
+	pre_hash_Nl = md_data->Nl - (md_data->Nl % (sizeof(md_data->data) *8));
 	for (ii=0; ii<hh_size; ii++)   {
-		out->counter[ii] = (sha.Nh >> 8*(hh_size-1-ii)) &0xFF;
+		out->counter[ii] = (md_data->Nh >> 8*(hh_size-1-ii)) &0xFF;
 		out->counter[hh_size+ii] = (pre_hash_Nl >> 8*(hh_size-1-ii)) &0xFF;
 	}
 	for (ii=0, out->counter_long=0; ii<(int)sizeof(out->counter); ii++)
 		out->counter_long = out->counter_long*0x100 + out->counter[ii];
 	sc_log(ctx, "Pre counter(%li):%s", out->counter_long, sc_dump_hex(out->counter, sizeof(out->counter)));
 
-	if (sha.num)   {
-		memcpy(out->last_block, in + in_len - sha.num, sha.num);
-		out->last_block_size = sha.num;
+	if (md_data->num)   {
+		memcpy(out->last_block, in + in_len - md_data->num, md_data->num);
+		out->last_block_size = md_data->num;
 		sc_log(ctx, "Last block(%"SC_FORMAT_LEN_SIZE_T"u):%s",
 		       out->last_block_size,
 		       sc_dump_hex(out->last_block, out->last_block_size));
 	}
 
-	SHA1_Final(out->hash, &sha);
+	if (EVP_DigestFinal_ex(mdctx, out->hash, &md_out_len) != 1) {
+		sc_log(ctx, "EVP_DigestFinal_ex failed");
+		goto err;
+	}
+
 	out->hash_size = SHA_DIGEST_LENGTH;
 	sc_log(ctx, "Expected digest %s\n", sc_dump_hex(out->hash, out->hash_size));
 
-	LOG_FUNC_RETURN(ctx, SC_SUCCESS);
+	r = SC_SUCCESS;
+	goto end;
+
+err:
+	if (ctx->debug > 0 && ctx->debug_file != 0)
+		ERR_print_errors_fp(ctx->debug_file);
+end:
+	EVP_MD_CTX_free(mdctx);
+	sc_evp_md_free(md);
+
+	LOG_FUNC_RETURN(ctx, r);
+
+#else /* OPENSSL_VERSION_NUMBER < 0x30000000L */
+	LOG_FUNC_RETURN(ctx, SC_ERROR_NOT_SUPPORTED);
+#endif /* OPENSSL_VERSION_NUMBER < 0x30000000L */
 }
 
 
@@ -3219,7 +3264,14 @@ static int
 iasecc_qsign_data_sha256(struct sc_context *ctx, const unsigned char *in, size_t in_len,
 				struct iasecc_qsign_data *out)
 {
-	SHA256_CTX sha256;
+#if OPENSSL_VERSION_NUMBER < 0x30000000L
+
+	int r = SC_ERROR_INTERNAL;
+	EVP_MD_CTX *mdctx = NULL;
+	EVP_MD *md = NULL;
+	SHA256_CTX *md_data;
+	unsigned int md_out_len;
+
 	SHA_LONG pre_hash_Nl;
 	int jj, ii;
 	int hh_size = sizeof(SHA_LONG), hh_num = SHA256_DIGEST_LENGTH / sizeof(SHA_LONG);
@@ -3233,37 +3285,71 @@ iasecc_qsign_data_sha256(struct sc_context *ctx, const unsigned char *in, size_t
 	       in_len);
 	memset(out, 0, sizeof(struct iasecc_qsign_data));
 
-	SHA256_Init(&sha256);
-	SHA256_Update(&sha256, in, in_len);
+	md = sc_evp_md(ctx, "SHA256");
+	mdctx = EVP_MD_CTX_new();
+	if (EVP_DigestInit_ex(mdctx, md, NULL) != 1) {
+		sc_log(ctx, "EVP_DigestInit_ex failed");
+		goto err;
+	}
+
+	md_data = EVP_MD_CTX_md_data(mdctx);
+	if (md_data == NULL) {
+		sc_log(ctx, "Failed to find md_data");
+		r = SC_ERROR_NOT_SUPPORTED;
+		goto err;
+	}
+
+	if (EVP_DigestUpdate(mdctx, in, in_len) != 1) {
+		sc_log(ctx, "EVP_DigestUpdate failed");
+		goto err;
+	}
 
 	for (jj=0; jj<hh_num; jj++)
 		for(ii=0; ii<hh_size; ii++)
-			out->pre_hash[jj*hh_size + ii] = ((sha256.h[jj] >> 8*(hh_size-1-ii)) & 0xFF);
+			out->pre_hash[jj*hh_size + ii] = ((md_data->h[jj] >> 8*(hh_size-1-ii)) & 0xFF);
 	out->pre_hash_size = SHA256_DIGEST_LENGTH;
 	sc_log(ctx, "Pre hash:%s", sc_dump_hex(out->pre_hash, out->pre_hash_size));
 
-	pre_hash_Nl = sha256.Nl - (sha256.Nl % (sizeof(sha256.data) * 8));
+	pre_hash_Nl = md_data->Nl - (md_data->Nl % (sizeof(md_data->data) * 8));
 	for (ii=0; ii<hh_size; ii++)   {
-		out->counter[ii] = (sha256.Nh >> 8*(hh_size-1-ii)) &0xFF;
+		out->counter[ii] = (md_data->Nh >> 8*(hh_size-1-ii)) &0xFF;
 		out->counter[hh_size+ii] = (pre_hash_Nl >> 8*(hh_size-1-ii)) &0xFF;
 	}
 	for (ii=0, out->counter_long=0; ii<(int)sizeof(out->counter); ii++)
 		out->counter_long = out->counter_long*0x100 + out->counter[ii];
 	sc_log(ctx, "Pre counter(%li):%s", out->counter_long, sc_dump_hex(out->counter, sizeof(out->counter)));
 
-	if (sha256.num)   {
-		memcpy(out->last_block, in + in_len - sha256.num, sha256.num);
-		out->last_block_size = sha256.num;
+	if (md_data->num)   {
+		memcpy(out->last_block, in + in_len - md_data->num, md_data->num);
+		out->last_block_size = md_data->num;
 		sc_log(ctx, "Last block(%"SC_FORMAT_LEN_SIZE_T"u):%s",
 		       out->last_block_size,
 		       sc_dump_hex(out->last_block, out->last_block_size));
 	}
 
-	SHA256_Final(out->hash, &sha256);
+	if (EVP_DigestFinal_ex(mdctx, out->hash, &md_out_len) != 1) {
+		sc_log(ctx, "EVP_DigestFinal_ex failed");
+		goto err;
+	}
+
 	out->hash_size = SHA256_DIGEST_LENGTH;
 	sc_log(ctx, "Expected digest %s\n", sc_dump_hex(out->hash, out->hash_size));
 
-	LOG_FUNC_RETURN(ctx, SC_SUCCESS);
+	r = SC_SUCCESS;
+	goto end;
+
+err:
+	if (ctx->debug > 0 && ctx->debug_file != 0)
+		ERR_print_errors_fp(ctx->debug_file);
+end:
+	EVP_MD_CTX_free(mdctx);
+	sc_evp_md_free(md);
+
+	LOG_FUNC_RETURN(ctx, r);
+
+#else /* OPENSSL_VERSION_NUMBER < 0x30000000L */
+	LOG_FUNC_RETURN(ctx, SC_ERROR_NOT_SUPPORTED);
+#endif /* OPENSSL_VERSION_NUMBER < 0x30000000L */
 }
 
 

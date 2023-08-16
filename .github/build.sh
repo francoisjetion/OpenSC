@@ -2,11 +2,7 @@
 
 set -ex -o xtrace
 
-if [ "$1" == "ossl3" -o "$2" == "ossl3" ]; then
-	export PKG_CONFIG_PATH=/usr/local/lib64/pkgconfig;
-else
-	export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig;
-fi
+export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig;
 
 if [ "$GITHUB_EVENT_NAME" == "pull_request" ]; then
 	PR_NUMBER=$(echo $GITHUB_REF | awk 'BEGIN { FS = "/" } ; { print $3 }')
@@ -38,7 +34,7 @@ if [ "$1" == "mingw" -o "$1" == "mingw32" ]; then
 	unset CC
 	unset CXX
 	./configure --host=$HOST --with-completiondir=/tmp --disable-openssl --disable-readline --disable-zlib --disable-notify --prefix=$PWD/win32/opensc || cat config.log;
-	make -j 2 V=1
+	make -j 4 V=1
 	# no point in running tests on mingw
 else
 	if [ "$1" == "ix86" ]; then
@@ -47,28 +43,35 @@ else
 	fi
 	# normal procedure
 
-	if [ "$1" == "ossl3" -o "$2" == "ossl3" ]; then
-		# without -Werror, because of rest of deprecated API
-		./configure --disable-dependency-tracking --disable-strict CFLAGS="-Wall -Wextra -Wno-unused-parameter -Wstrict-aliasing=2"
+	if [ "$1" == "valgrind" ]; then
+		./configure --disable-notify --enable-valgrind
 	elif [ "$1" == "no-shared" ]; then
 		./configure --disable-shared
 	else
 		./configure --disable-dependency-tracking
 	fi
-	make -j 2 V=1
+	make -j 4 V=1
 	# 32b build has some issues to find openssl correctly
-	if [ "$1" != "ix86" ]; then
+	if [ "$1" == "valgrind" ]; then
+		make check-valgrind-memcheck
+		RV=$?
+		source .github/dump-logs.sh
+		if [ $RV -ne 0 ]; then
+			exit $RV
+		fi
+	elif [ "$1" != "ix86" ]; then
 		make check
+		RV=$?
+		source .github/dump-logs.sh
+		if [ $RV -ne 0 ]; then
+			exit $RV
+		fi
 	fi
 fi
 
 # this is broken in old ubuntu
 if [ "$1" == "dist" ]; then
-	if [ "$1" == "ossl3" -o "$2" == "ossl3" ]; then
-		make distcheck DISTCHECK_CONFIGURE_FLAGS="--disable-strict CFLAGS=\"-Wall -Wextra -Wno-unused-parameter -Wstrict-aliasing=2\""
-	else
-		make distcheck
-	fi
+	make distcheck
 	make dist
 fi
 

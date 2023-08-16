@@ -13,7 +13,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307,
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301
  * USA
  */
 
@@ -32,6 +32,10 @@
 #include <sys/time.h>
 #endif
 #include <time.h>
+#include <unistd.h>
+#endif
+#ifdef HAVE_PTHREAD
+#include <pthread.h>
 #endif
 
 #define CRYPTOKI_EXPORTS
@@ -317,14 +321,17 @@ enter(const char *function)
 
 	fprintf(spy_output, "\n%d: %s\n", count++, function);
 #ifdef _WIN32
-        GetLocalTime(&st);
-        fprintf(spy_output, "%i-%02i-%02i %02i:%02i:%02i.%03i\n", st.wYear, st.wMonth, st.wDay,
-			st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+	GetLocalTime(&st);
+	fprintf(spy_output, "P:%lu; T:%lu %i-%02i-%02i %02i:%02i:%02i.%03i\n",
+			(unsigned long)GetCurrentProcessId(), (unsigned long)GetCurrentThreadId(),
+			st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
 #else
 	gettimeofday (&tv, NULL);
 	tm = localtime (&tv.tv_sec);
 	strftime (time_string, sizeof(time_string), "%F %H:%M:%S", tm);
-	fprintf(spy_output, "%s.%03ld\n", time_string, (long)tv.tv_usec / 1000);
+	fprintf(spy_output, "P:%lu; T:0x%lu %s.%03ld\n",
+			(unsigned long)getpid(), (unsigned long)pthread_self(),
+			time_string, (long)tv.tv_usec / 1000);
 #endif
 
 }
@@ -689,7 +696,7 @@ C_GetMechanismInfo(CK_SLOT_ID  slotID, CK_MECHANISM_TYPE type,
 
 	enter("C_GetMechanismInfo");
 	spy_dump_ulong_in("slotID", slotID);
-	FPRINTF_LOOKUP_ENUM("[in] type = %s", MEC_T, type);
+	FPRINTF_LOOKUP_ENUM("[in] type = %s\n", MEC_T, type);
 
 	rv = po->C_GetMechanismInfo(slotID, type, pInfo);
 	if(rv == CKR_OK) {

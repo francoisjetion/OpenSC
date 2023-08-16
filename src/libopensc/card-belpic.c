@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 /*     About the Belpic (Belgian Personal Identity Card) card
@@ -111,7 +111,7 @@ static long t1, t2, tot_read = 0, tot_dur = 0, dur;
 /* Data in the return value for the GET CARD DATA command:
  * All fields are one byte, except when noted otherwise.
  *
- * See ง6.9 in
+ * See ยง6.9 in
  * https://github.com/Fedict/eid-mw/blob/master/doc/sdk/documentation/Public_Belpic_Applet_v1%207_Ref_Manual%20-%20A01.pdf
  * for the full documentation on the GET CARD DATA command.
  */
@@ -195,7 +195,7 @@ static int get_carddata(sc_card_t *card, u8* carddata_loc, unsigned int carddata
 		return r;
 	}
 	if(apdu.resplen < carddataloc_len) {
-		sc_log(card->ctx, 
+		sc_log(card->ctx,
 			 "GetCardData: card returned %"SC_FORMAT_LEN_SIZE_T"u bytes rather than expected %d\n",
 			 apdu.resplen, carddataloc_len);
 		return SC_ERROR_WRONG_LENGTH;
@@ -296,7 +296,7 @@ static int belpic_select_file(sc_card_t *card,
 }
 
 static int belpic_read_binary(sc_card_t *card,
-			      unsigned int idx, u8 * buf, size_t count, unsigned long flags)
+			      unsigned int idx, u8 * buf, size_t count, unsigned long *flags)
 {
 	int r;
 

@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -56,8 +56,11 @@ struct sc_pkcs15_emulator_handler builtin_emulators[] = {
 	{ "coolkey",    sc_pkcs15emu_coolkey_init_ex	},
 	{ "din66291",   sc_pkcs15emu_din_66291_init_ex	},
 	{ "esteid2018", sc_pkcs15emu_esteid2018_init_ex	},
+	{ "skeid",      sc_pkcs15emu_skeid_init_ex      },
 	{ "cardos",     sc_pkcs15emu_cardos_init_ex	},
 	{ "nqapplet",   sc_pkcs15emu_nqapplet_init_ex },
+	{ "esign",      sc_pkcs15emu_starcos_esign_init_ex },
+	{ "eOI",        sc_pkcs15emu_eoi_init_ex },
 	{ NULL, NULL }
 };
 
@@ -102,11 +105,16 @@ int sc_pkcs15_is_emulation_only(sc_card_t *card)
 		case SC_CARD_TYPE_PIV_II_HIST:
 		case SC_CARD_TYPE_PIV_II_NEO:
 		case SC_CARD_TYPE_PIV_II_YUBIKEY4:
+		case SC_CARD_TYPE_PIV_II_SWISSBIT:
 		case SC_CARD_TYPE_ESTEID_2018:
 		case SC_CARD_TYPE_CARDOS_V5_0:
 		case SC_CARD_TYPE_CARDOS_V5_3:
 		case SC_CARD_TYPE_NQ_APPLET:
-
+		case SC_CARD_TYPE_STARCOS_V3_4_ESIGN:
+		case SC_CARD_TYPE_STARCOS_V3_5_ESIGN:
+		case SC_CARD_TYPE_SKEID_V3:
+		case SC_CARD_TYPE_EOI:
+		case SC_CARD_TYPE_EOI_CONTACTLESS:
 			return 1;
 		default:
 			return 0;

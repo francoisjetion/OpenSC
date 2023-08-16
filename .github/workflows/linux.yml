@@ -1,3 +1,4 @@
+---
 name: Linux
 
 on:
@@ -5,77 +6,81 @@ on:
     paths:
       - '**.c'
       - '**.h'
+      - '**.sh'
       - .github/workflows/linux.yml
-      - .github/setup-linux.sh
-      - .github/build.sh
-      - .github/push-artifacts.sh
+      - '**.am'
+      - doc/**
+      - configure.ac
   push:
+
+permissions:
+  contents: read  #  to fetch code (actions/checkout)
+
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - run: .github/setup-linux.sh
       - run: .github/build.sh dist
-      - uses: actions/cache@v2
+      - name: Upload test logs
+        uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: ubuntu-test-logs
+          path: |
+            tests/*.log
+            src/tests/unittests/*.log
+      - uses: actions/cache@v3
         id: cache-build
         with:
           path: ./*
           key: ${{ runner.os }}-${{ github.sha }}
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: opensc-build
           path:
             opensc*.tar.gz
+
+  valgrind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: .github/setup-linux.sh
+      - run: .github/build.sh valgrind
       - name: Upload test logs
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
+        if: failure()
         with:
-          name: ubuntu-test-logs
-          path:
+          name: ubuntu-valgrind-logs
+          path: |
             tests/*.log
+            src/tests/unittests/*.log
 
   build-no-shared:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - run: .github/setup-linux.sh
-      - run: .github/build.sh no-shared
+      - run: .github/build.sh no-shared valgrind
 
   build-ix86:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - run: .github/setup-linux.sh ix86
       - run: .github/build.sh ix86
-
-  build-ubuntu-18:
-    runs-on: ubuntu-18.04
-    steps:
-      - uses: actions/checkout@v2
-      - run: .github/setup-linux.sh
-      - run: .github/build.sh
-      - uses: actions/cache@v2
-        id: cache-build
-        with:
-          path: ./*
-          key: ${{ runner.os }}-18-${{ github.sha }}
-      - name: Upload test logs
-        uses: actions/upload-artifact@v2
-        with:
-          name: ubuntu-18-test-logs
-          path:
-            tests/*.log
 
   build-mingw:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - run: .github/setup-linux.sh mingw
       - run: .github/build.sh mingw
       - name: Cache build artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: opensc-build-mingw
           path:
@@ -84,74 +89,92 @@ jobs:
   build-mingw32:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - run: .github/setup-linux.sh mingw32
       - run: .github/build.sh mingw32
       - name: Cache build artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: opensc-build-mingw32
           path:
             win32/Output/OpenSC*.exe
 
   test-piv:
-    runs-on: ubuntu-18.04
-    needs: [build-ubuntu-18]
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
-        id: cache-build
-        with:
-          path: ./*
-          key: ${{ runner.os }}-18-${{ github.sha }}
-      - run: .github/setup-linux.sh piv
-      - run: .github/test-piv.sh
-
-  test-isoapplet:
-    runs-on: ubuntu-18.04
-    needs: [build-ubuntu-18]
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
-        id: cache-build
-        with:
-          path: ./*
-          key: ${{ runner.os }}-18-${{ github.sha }}
-      - run: .github/setup-linux.sh isoapplet
-      - run: .github/test-isoapplet.sh
-
-  test-gidsapplet:
-    runs-on: ubuntu-18.04
-    needs: [build-ubuntu-18]
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
-        id: cache-build
-        with:
-          path: ./*
-          key: ${{ runner.os }}-18-${{ github.sha }}
-      - run: .github/setup-linux.sh gidsapplet
-      - run: .github/test-gidsapplet.sh
-
-  test-openpgp:
-    runs-on: ubuntu-18.04
-    needs: [build-ubuntu-18]
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
-        id: cache-build
-        with:
-          path: ./*
-          key: ${{ runner.os }}-18-${{ github.sha }}
-      - run: .github/setup-linux.sh openpgp
-      - run: .github/test-openpgp.sh
-
-  build-clang-tidy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [build]
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v3
+        id: cache-build
+        with:
+          path: ./*
+          key: ${{ runner.os }}-${{ github.sha }}
+      - run: .github/setup-linux.sh piv
+      - run: .github/test-piv.sh
+      - run: .github/test-piv.sh valgrind
+
+  test-isoapplet-v0:
+    runs-on: ubuntu-20.04
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v3
+        id: cache-build
+        with:
+          path: ./*
+          key: ${{ runner.os }}-${{ github.sha }}
+      - run: .github/setup-linux.sh isoapplet
+      - run: .github/test-isoapplet.sh v0
+      - run: .github/test-isoapplet.sh v0 valgrind
+
+  test-isoapplet-v1:
+    runs-on: ubuntu-20.04
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v3
+        id: cache-build
+        with:
+          path: ./*
+          key: ${{ runner.os }}-${{ github.sha }}
+      - run: .github/setup-linux.sh isoapplet
+      - run: .github/test-isoapplet.sh v1
+      - run: .github/test-isoapplet.sh v1 valgrind
+
+  test-gidsapplet:
+    runs-on: ubuntu-20.04
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v3
+        id: cache-build
+        with:
+          path: ./*
+          key: ${{ runner.os }}-${{ github.sha }}
+      - run: .github/setup-linux.sh gidsapplet
+      - run: .github/test-gidsapplet.sh
+      - run: .github/test-gidsapplet.sh valgrind
+
+  test-openpgp:
+    runs-on: ubuntu-20.04
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v3
+        id: cache-build
+        with:
+          path: ./*
+          key: ${{ runner.os }}-${{ github.sha }}
+      - run: .github/setup-linux.sh openpgp
+      - run: .github/test-openpgp.sh
+      - run: .github/test-openpgp.sh valgrind
+
+  build-clang-tidy:
+    runs-on: ubuntu-20.04
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v3
         id: cache-build
         with:
           path: ./*
@@ -160,24 +183,25 @@ jobs:
       - run: .github/build.sh
 
   test-cac:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [build]
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v3
         id: cache-build
         with:
           path: ./*
           key: ${{ runner.os }}-${{ github.sha }}
       - run: .github/setup-linux.sh cac
       - run: .github/test-cac.sh
+      - run: .github/test-cac.sh valgrind
 
   test-oseid:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     needs: [build]
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v3
         id: cache-build
         with:
           path: ./*
@@ -185,59 +209,61 @@ jobs:
       - run: .github/setup-linux.sh oseid
       - run: .github/test-oseid.sh
 
-  ##########################
-  ## OpenSSL 3.0 pipeline ##
-  ##########################
-  build-openssl-3:
-    runs-on: ubuntu-latest
+  ############################################
+  ## Ubuntu 22.04 with OpenSSL 3.0 pipeline ##
+  ############################################
+  build-ubuntu-22:
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v3
-      - run: .github/setup-linux.sh ossl3
-      - run: .github/build.sh dist ossl3
+      - run: .github/setup-linux.sh
+      - run: .github/build.sh dist valgrind
       - uses: actions/upload-artifact@v3
+        if: failure()
         with:
-          name: logs
+          name: ubuntu-22-test-logs
           path: |
             tests/*.log
-            config.log
-      - uses: actions/cache@v2
+            src/tests/unittests/*.log
+      - uses: actions/cache@v3
         id: cache-build
         if: ${{ success() }}
         with:
           path: ./*
-          key: ${{ runner.os }}-${{ github.sha }}-ossl3
+          key: ${{ runner.os }}-22-${{ github.sha }}
       - name: Upload artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         if: ${{ success() }}
         with:
           name: opensc-build
           path:
             opensc*.tar.gz
 
-  test-cac-openssl-3:
-    runs-on: ubuntu-latest
-    needs: [build-openssl-3]
+  test-cac-ubuntu-22:
+    runs-on: ubuntu-22.04
+    needs: [build-ubuntu-22]
     steps:
       - uses: actions/checkout@v3
       - uses: actions/cache@v3
         id: cache-build
         with:
           path: ./*
-          key: ${{ runner.os }}-${{ github.sha }}-ossl3
-      - run: .github/setup-linux.sh cac ossl3
+          key: ${{ runner.os }}-22-${{ github.sha }}
+      - run: .github/setup-linux.sh cac
       - run: .github/test-cac.sh
+      - run: .github/test-cac.sh valgrind
 
-  test-oseid-openssl-3:
-    runs-on: ubuntu-latest
-    needs: [build-openssl-3]
+  test-oseid-ubuntu-22:
+    runs-on: ubuntu-22.04
+    needs: [build-ubuntu-22]
     steps:
       - uses: actions/checkout@v3
       - uses: actions/cache@v3
         id: cache-build
         with:
           path: ./*
-          key: ${{ runner.os }}-${{ github.sha }}-ossl3
-      - run: .github/setup-linux.sh oseid ossl3
+          key: ${{ runner.os }}-22-${{ github.sha }}
+      - run: .github/setup-linux.sh oseid
       - run: .github/test-oseid.sh
 
   #######################
@@ -248,19 +274,20 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: .github/setup-linux.sh libressl
-      - run: .github/build.sh dist libressl
+      - run: .github/build.sh dist libressl valgrind
       - uses: actions/upload-artifact@v3
+        if: failure()
         with:
-          name: logs
+          name: libressl-logs
           path: |
             tests/test-suite.log
             config.log
-      - uses: actions/cache@v2
+      - uses: actions/cache@v3
         id: cache-build
         if: ${{ success() }}
         with:
           path: ./*
-          key: ${{ runner.os }}-${{ github.sha }}-libressl
+          key: ${{ runner.os }}-libressl-${{ github.sha }}
 
   test-cac-libressl:
     runs-on: ubuntu-latest
@@ -271,9 +298,10 @@ jobs:
         id: cache-build
         with:
           path: ./*
-          key: ${{ runner.os }}-${{ github.sha }}-libressl
+          key: ${{ runner.os }}-libressl-${{ github.sha }}
       - run: .github/setup-linux.sh cac libressl
       - run: .github/test-cac.sh
+      - run: .github/test-cac.sh valgrind
 
   test-oseid-libressl:
     runs-on: ubuntu-latest
@@ -284,7 +312,7 @@ jobs:
         id: cache-build
         with:
           path: ./*
-          key: ${{ runner.os }}-${{ github.sha }}-libressl
+          key: ${{ runner.os }}-libressl-${{ github.sha }}
       - run: .github/setup-linux.sh oseid libressl
       - run: .github/test-oseid.sh
 
@@ -295,14 +323,14 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build, build-mingw]
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v3
         id: cache-build
         with:
           path: ./*
           key: ${{ runner.os }}-${{ github.sha }}
       - name: Pull mingw build artifacts
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: opensc-build-mingw
       - run: git config --global user.email "builds@github.com"

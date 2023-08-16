@@ -17,7 +17,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifdef HAVE_CONFIG_H
@@ -39,7 +39,6 @@
 #include "authentic.h"
 
 #include <openssl/bn.h>
-#include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/err.h>
 #include <openssl/rand.h>
@@ -152,9 +151,9 @@ authentic_update_blob(struct sc_context *ctx, unsigned tag, unsigned char *data,
 
 
 static int
-authentic_parse_size(unsigned char *in, size_t *out)
+authentic_parse_size(unsigned char *in, size_t in_len, size_t *out)
 {
-	if (!in || !out)
+	if (!in || !out || in_len < 1)
 		return SC_ERROR_INVALID_ARGUMENTS;
 
 	if (*in < 0x80)   {
@@ -162,10 +161,14 @@ authentic_parse_size(unsigned char *in, size_t *out)
 		return 1;
 	}
 	else if (*in == 0x81)   {
+		if (in_len < 2)
+			return SC_ERROR_INVALID_DATA;
 		*out = *(in + 1);
 		return 2;
 	}
 	else if (*in == 0x82)   {
+		if (in_len < 3)
+			return SC_ERROR_INVALID_DATA;
 		*out = *(in + 1) * 0x100 + *(in + 2);
 		return 3;
 	}
@@ -186,6 +189,8 @@ authentic_get_tagged_data(struct sc_context *ctx, unsigned char *in, size_t in_l
 
 	for (offs = 0; offs < in_len; )   {
 		if ((*(in + offs) == 0x7F) || (*(in + offs) == 0x5F))   {
+			if (offs + 1 >= in_len)
+				LOG_TEST_RET(ctx, SC_ERROR_INTERNAL, "parse error: invalid data");
 			tag = *(in + offs) * 0x100 + *(in + offs + 1);
 			tag_len = 2;
 		}
@@ -194,10 +199,16 @@ authentic_get_tagged_data(struct sc_context *ctx, unsigned char *in, size_t in_l
 			tag_len = 1;
 		}
 
-		size_len = authentic_parse_size(in + offs + tag_len, &size);
+		if (offs + tag_len >= in_len)
+			LOG_TEST_RET(ctx, SC_ERROR_INTERNAL, "parse error: invalid data");
+
+		size_len = authentic_parse_size(in + offs + tag_len, in_len - (offs + tag_len), &size);
 		LOG_TEST_RET(ctx, size_len, "parse error: invalid size data");
 
 		if (tag == in_tag)   {
+			if (in_len - (offs + tag_len + size_len) < size)
+				LOG_TEST_RET(ctx, SC_ERROR_INTERNAL, "parse error: invalid data");
+
 			*out = in + offs + tag_len + size_len;
 			*out_len = size;
 
@@ -830,7 +841,7 @@ authentic_select_file(struct sc_card *card, const struct sc_path *path,
 
 static int
 authentic_read_binary(struct sc_card *card, unsigned int idx,
-		unsigned char *buf, size_t count, unsigned long flags)
+		unsigned char *buf, size_t count, unsigned long *flags)
 {
 	struct sc_context *ctx = card->ctx;
 	struct sc_apdu apdu;
@@ -1123,6 +1134,8 @@ authentic_create_file(struct sc_card *card, struct sc_file *file)
 
 	if (card->cache.valid  && card->cache.current_df)   {
 		const struct sc_acl_entry *entry = sc_file_get_acl_entry(card->cache.current_df, SC_AC_OP_CREATE);
+		if (!entry)
+			LOG_FUNC_RETURN(ctx, SC_ERROR_INTERNAL);
 
 		sc_log(ctx, "CREATE method/reference %X/%X", entry->method, entry->key_ref);
 		if (entry->method == SC_AC_SCB)
@@ -2300,6 +2313,17 @@ authentic_sm_get_wrapped_apdu(struct sc_card *card, struct sc_apdu *plain, struc
 	LOG_FUNC_RETURN(ctx, SC_SUCCESS);
 }
 #endif
+
+int authentic_logout(sc_card_t *card)
+{
+	int r = SC_ERROR_NOT_SUPPORTED;
+
+	if (card->type == SC_CARD_TYPE_OBERTHUR_AUTHENTIC_3_2) {
+		r = authentic_select_aid(card, aid_AuthentIC_3_2, sizeof(aid_AuthentIC_3_2), NULL, NULL);
+	}
+
+	return r;
+}
 
 static struct sc_card_driver *
 sc_get_driver(void)

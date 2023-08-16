@@ -19,6 +19,7 @@ BuildRequires:  bash-completion
 BuildRequires:  zlib-devel
 # For tests
 BuildRequires:  libcmocka-devel
+BuildRequires:  vim-common
 BuildRequires:  softhsm
 BuildRequires:  openssl
 Requires:       pcsc-lite-libs%{?_isa}
@@ -44,7 +45,7 @@ every software/card that does so, too.
 
 # The test-pkcs11-tool-allowed-mechanisms already works in Fedora
 sed -i -e '/XFAIL_TESTS/,$ {
-  s/XFAIL_TESTS.*/XFAIL_TESTS=test-pkcs11-tool-test-threads.sh test-pkcs11-tool-test.sh test-pkcs11-tool-unwrap-wrap-test.sh/
+  s/XFAIL_TESTS.*/XFAIL_TESTS=test-pkcs11-tool-test-threads.sh test-pkcs11-tool-test.sh/
   q
 }' tests/Makefile.am
 
@@ -63,14 +64,13 @@ sed -i -e 's/opensc.conf/opensc-%{_arch}.conf/g' src/libopensc/Makefile.in
 sed -i -e 's|"/lib /usr/lib\b|"/%{_lib} %{_libdir}|' configure # lib64 rpaths
 %set_build_flags
 CFLAGS="$CFLAGS -Wstrict-aliasing=2 -Wno-deprecated-declarations"
-%configure --disable-static\
+%configure --disable-static \
   --disable-autostart-items \
   --disable-notify \
   --disable-assert \
   --enable-pcsc \
   --enable-cmocka \
-  --enable-sm \
-  --with-pcsc-provider=libpcsclite.so.1
+  --enable-sm
 %make_build
 
 
@@ -117,7 +117,6 @@ rm -rf %{buildroot}%{_bindir}/pkcs11-register
 rm -rf %{buildroot}%{_mandir}/man1/pkcs11-register.1*
 
 # Remove the notification files
-rm %{buildroot}%{_bindir}/opensc-notify
 rm %{buildroot}%{_datadir}/applications/org.opensc.notify.desktop
 rm %{buildroot}%{_mandir}/man1/opensc-notify.1*
 
@@ -162,10 +161,8 @@ rm %{buildroot}%{_mandir}/man1/opensc-notify.1*
 %{_libdir}/lib*.so.*
 %{_libdir}/opensc-pkcs11.so
 %{_libdir}/pkcs11-spy.so
-%{_libdir}/onepin-opensc-pkcs11.so
 %dir %{_libdir}/pkcs11
 %{_libdir}/pkcs11/opensc-pkcs11.so
-%{_libdir}/pkcs11/onepin-opensc-pkcs11.so
 %{_libdir}/pkcs11/pkcs11-spy.so
 %{_datadir}/opensc/
 %{_mandir}/man1/cardos-tool.1*

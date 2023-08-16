@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 /*
@@ -57,6 +57,7 @@
 #ifdef ENABLE_OPENSSL
 #include <openssl/opensslv.h>
 #include <openssl/pem.h>
+#include <openssl/crypto.h>
 #endif
 
 #ifdef ENABLE_OPENPACE
@@ -97,7 +98,7 @@ HINSTANCE g_inst;
 #define NULLSTR(a) (a == NULL ? "<NULL>" : a)
 #define NULLWSTR(a) (a == NULL ? L"<NULL>" : a)
 
-#define MD_MAX_KEY_CONTAINERS 12
+#define MD_MAX_KEY_CONTAINERS 32
 #define MD_CARDID_SIZE 16
 
 #define MD_ROLE_USER_SIGN (ROLE_ADMIN + 1)
@@ -482,6 +483,52 @@ check_card_reader_status(PCARD_DATA pCardData, const char *name)
 }
 
 static DWORD
+get_pin_by_name(PCARD_DATA pCardData, struct sc_pkcs15_card *p15card, int role, struct sc_pkcs15_object **ret_obj)
+{
+	scconf_block *conf_block = NULL;
+	scconf_block **blocks = NULL;
+	char *pin_type;
+	char str_path[SC_MAX_AID_STRING_SIZE];
+	char *pin = NULL;
+	struct sc_pkcs15_id id;
+
+	MD_FUNC_CALLED(pCardData, 1);
+
+	switch (role) {
+		case  ROLE_USER:
+			pin_type = "user_pin";
+			break;
+		case MD_ROLE_USER_SIGN:
+			pin_type = "sign_pin";
+			break;
+		default:
+			MD_FUNC_RETURN(pCardData, 1, SCARD_E_INVALID_PARAMETER);
+	}
+
+	conf_block = sc_get_conf_block(p15card->card->ctx, "framework", "pkcs15", 1);
+	if (!conf_block)
+		MD_FUNC_RETURN(pCardData, 1, SCARD_F_INTERNAL_ERROR);
+
+	memset(str_path, 0, sizeof(str_path));
+	sc_bin_to_hex(p15card->app->path.value, p15card->app->path.len, str_path, sizeof(str_path), 0);
+	blocks = scconf_find_blocks(p15card->card->ctx->conf, conf_block, "application", str_path);
+	if (blocks)   {
+		if (blocks[0]) {
+			pin = (char *)scconf_get_str(blocks[0], pin_type, NULL);
+		}
+		free(blocks);
+	}
+	if (!pin)
+		MD_FUNC_RETURN(pCardData, 1, SCARD_F_INTERNAL_ERROR);
+
+	strncpy((char*)id.value, pin, sizeof(id.value) - 1);
+	id.len = strlen(pin);
+	if (id.len > sizeof(id.value))
+		id.len = sizeof(id.value);
+	MD_FUNC_RETURN(pCardData, 1, sc_pkcs15_find_pin_by_auth_id(p15card, &id, ret_obj) ? SCARD_F_INTERNAL_ERROR : SCARD_S_SUCCESS);
+}
+
+static DWORD
 md_get_pin_by_role(PCARD_DATA pCardData, PIN_ID role, struct sc_pkcs15_object **ret_obj)
 {
 	VENDOR_SPECIFIC *vs;
@@ -495,6 +542,10 @@ md_get_pin_by_role(PCARD_DATA pCardData, PIN_ID role, struct sc_pkcs15_object **
 	vs = (VENDOR_SPECIFIC*)(pCardData->pvVendorSpecific);
 	if (!ret_obj)
 		MD_FUNC_RETURN(pCardData, 1, SCARD_E_INVALID_PARAMETER);
+
+	rv = get_pin_by_name(pCardData, vs->p15card, role, ret_obj);
+	if (!rv)
+		goto out;
 
 	/* please keep me in sync with _get_auth_object_by_name() in pkcs11/framework-pkcs15.c */
 	if (role == ROLE_USER) {
@@ -545,6 +596,7 @@ md_get_pin_by_role(PCARD_DATA pCardData, PIN_ID role, struct sc_pkcs15_object **
 		MD_FUNC_RETURN(pCardData, 1, SCARD_E_UNSUPPORTED_FEATURE);
 	}
 
+out:
 	if (rv)
 		MD_FUNC_RETURN(pCardData, 1, SCARD_E_UNSUPPORTED_FEATURE);
 
@@ -697,15 +749,16 @@ md_get_config_bool(PCARD_DATA pCardData, char *flag_name, BOOL ret_default)
 static BOOL
 md_is_pinpad_dlg_enable_cancel(PCARD_DATA pCardData)
 {
-	TCHAR path[MAX_PATH]={0};
+	VENDOR_SPECIFIC *vs;
 
 	logprintf(pCardData, 2, "Is cancelling the PIN pad dialog enabled?\n");
 
-	if (GetModuleFileName(NULL, path, ARRAYSIZE(path))) {
+	vs = (VENDOR_SPECIFIC*) pCardData->pvVendorSpecific;
+	if (vs && vs->ctx && vs->ctx->exe_path) {
 		DWORD enable_cancel;
 		size_t sz = sizeof enable_cancel;
 
-		if (SC_SUCCESS == sc_ctx_win32_get_config_value(NULL, path,
+		if (SC_SUCCESS == sc_ctx_win32_get_config_value(NULL, vs->ctx->exe_path,
 					SUBKEY_ENABLE_CANCEL,
 					(char *)(&enable_cancel), &sz)) {
 			switch (enable_cancel) {
@@ -1444,9 +1497,11 @@ md_fs_read_msroots_file(PCARD_DATA pCardData, struct md_file *file)
 	for(ii = 0; ii < cert_num; ii++)   {
 		struct sc_pkcs15_cert_info *cert_info = (struct sc_pkcs15_cert_info *) prkey_objs[ii]->data;
 		struct sc_pkcs15_cert *cert = NULL;
+		int private_obj;
 		PCCERT_CONTEXT wincert = NULL;
 		if (cert_info->authority) {
-			rv = sc_pkcs15_read_certificate(vs->p15card, cert_info, &cert);
+			private_obj = prkey_objs[ii]->flags & SC_PKCS15_CO_FLAG_PRIVATE;
+			rv = sc_pkcs15_read_certificate(vs->p15card, cert_info, private_obj, &cert);
 			if(rv)   {
 				logprintf(pCardData, 2, "Cannot read certificate idx:%i: sc-error %d\n", ii, rv);
 				continue;
@@ -1546,8 +1601,9 @@ md_fs_read_content(PCARD_DATA pCardData, char *parent, struct md_file *file)
 			struct sc_pkcs15_cert *cert = NULL;
 			struct sc_pkcs15_object *cert_obj = vs->p15_containers[idx].cert_obj;
 			struct sc_pkcs15_cert_info *cert_info = (struct sc_pkcs15_cert_info *)cert_obj->data;
+			int private_obj = cert_obj->flags & SC_PKCS15_CO_FLAG_PRIVATE;
 
-			rv = sc_pkcs15_read_certificate(vs->p15card, cert_info, &cert);
+			rv = sc_pkcs15_read_certificate(vs->p15card, cert_info, private_obj, &cert);
 			if(rv)   {
 				logprintf(pCardData, 2, "Cannot read certificate idx:%i: sc-error %d\n", idx, rv);
 				logprintf(pCardData, 2, "set cardcf from 'DATA' pkcs#15 object\n");
@@ -2787,7 +2843,8 @@ md_query_key_sizes(PCARD_DATA pCardData, DWORD dwKeySpec, CARD_KEY_SIZES *pKeySi
 		for (i = 0; i < count; i++) {
 			algo_info = vs->p15card->card->algorithms + i;
 			if (algo_info->algorithm == SC_ALGORITHM_EC) {
-				flag = SC_ALGORITHM_ECDH_CDH_RAW | SC_ALGORITHM_EXT_EC_NAMEDCURVE;
+				flag = SC_ALGORITHM_ECDH_CDH_RAW;
+				/* TODO  check if namedCurve matches Windows supported curves */
 				/* ECDHE */
 				if ((dwKeySpec == AT_ECDHE_P256) && (algo_info->key_length == 256) && (algo_info->flags & flag)) {
 					keysize = 256;
@@ -2802,11 +2859,12 @@ md_query_key_sizes(PCARD_DATA pCardData, DWORD dwKeySpec, CARD_KEY_SIZES *pKeySi
 					break;
 				}
 				/* ECDSA */
-				flag = SC_ALGORITHM_ECDSA_HASH_NONE|
+				flag = SC_ALGORITHM_ECDSA_RAW|
+						SC_ALGORITHM_ECDSA_HASH_NONE|
 						SC_ALGORITHM_ECDSA_HASH_SHA1|
 						SC_ALGORITHM_ECDSA_HASH_SHA224|
-						SC_ALGORITHM_ECDSA_HASH_SHA256|
-						SC_ALGORITHM_EXT_EC_NAMEDCURVE;
+						SC_ALGORITHM_ECDSA_HASH_SHA256;
+				/* TODO  check if namedCurve matches Windows supported curves */
 				if ((dwKeySpec == AT_ECDSA_P256) && (algo_info->key_length == 256) && (algo_info->flags & flag)) {
 					keysize = 256;
 					break;
@@ -3101,8 +3159,7 @@ md_dialog_perform_pin_operation(PCARD_DATA pCardData, int operation, struct sc_p
 	result = TaskDialogIndirect(&tc, NULL, NULL, &user_checked);
 
 	if (user_checked != checked) {
-		TCHAR path[MAX_PATH]={0};
-		if (GetModuleFileName(NULL, path, ARRAYSIZE(path))) {
+		if (pv && pv->ctx && pv->ctx->exe_path) {
 			HKEY hKey;
 			LSTATUS lstatus = RegOpenKeyExA(HKEY_CURRENT_USER,
 					SUBKEY_ENABLE_CANCEL, 0, KEY_WRITE, &hKey);
@@ -3116,7 +3173,7 @@ md_dialog_perform_pin_operation(PCARD_DATA pCardData, int operation, struct sc_p
 				if (user_checked == FALSE) {
 					enable_cancel = 1;
 				}
-				lstatus = RegSetValueEx(hKey, path, 0, REG_DWORD,
+				lstatus = RegSetValueEx(hKey, pv->ctx->exe_path, 0, REG_DWORD,
 						(const BYTE*)&enable_cancel, sizeof(enable_cancel));
 				RegCloseKey(hKey);
 			}
@@ -3560,9 +3617,10 @@ DWORD WINAPI CardGetContainerInfo(__in PCARD_DATA pCardData, __in BYTE bContaine
 
 	if (!pubkey_der.value && cont->cert_obj)   {
 		struct sc_pkcs15_cert *cert = NULL;
+		int private_obj = cont->cert_obj->flags & SC_PKCS15_CO_FLAG_PRIVATE;
 
 		logprintf(pCardData, 1, "now read certificate '%.*s'\n", (int) sizeof cont->cert_obj->label, cont->cert_obj->label);
-		rv = sc_pkcs15_read_certificate(vs->p15card, (struct sc_pkcs15_cert_info *)(cont->cert_obj->data), &cert);
+		rv = sc_pkcs15_read_certificate(vs->p15card, (struct sc_pkcs15_cert_info *)(cont->cert_obj->data), private_obj, &cert);
 		if(!rv)   {
 			rv = sc_pkcs15_encode_pubkey(vs->ctx, cert->key, &pubkey_der.value, &pubkey_der.len);
 			if (rv)   {
@@ -3687,8 +3745,10 @@ DWORD WINAPI CardGetContainerInfo(__in PCARD_DATA pCardData, __in BYTE bContaine
 				memcpy(((PBYTE)publicKey) + sizeof(BCRYPT_ECCKEY_BLOB),  pubkey_der.value + 3,  pubkey_der.len -3);
 
 				logprintf(pCardData, 3,
-					  "return info on ECC SIGN_CONTAINER_INDEX %u\n",
-					  (unsigned int)bContainerIndex);
+					  "return info on ECC SIGN_CONTAINER_INDEX %u cbKey:%u dwMagic:%u\n",
+					  (unsigned int)bContainerIndex,
+					  (unsigned int)publicKey->cbKey,
+					  (unsigned int)publicKey->dwMagic);
 			}
 			if (cont->size_key_exchange)   {
 				sz = (DWORD) (sizeof(BCRYPT_ECCKEY_BLOB) +  pubkey_der.len -3);
@@ -3726,13 +3786,22 @@ DWORD WINAPI CardGetContainerInfo(__in PCARD_DATA pCardData, __in BYTE bContaine
 				memcpy(((PBYTE)publicKey) + sizeof(BCRYPT_ECCKEY_BLOB),  pubkey_der.value + 3,  pubkey_der.len -3);
 
 				logprintf(pCardData, 3,
-					  "return info on ECC KEYX_CONTAINER_INDEX %u\n",
-					  (unsigned int)bContainerIndex);
+					  "return info on ECC KEYX_CONTAINER_INDEX %u cbKey:%u dwMagic:%u\n",
+					  (unsigned int)bContainerIndex,
+					  (unsigned int)publicKey->cbKey,
+					  (unsigned int)publicKey->dwMagic);
 			}
 		}
 	}
 	logprintf(pCardData, 7, "returns container(idx:%u) info\n",
 		  (unsigned int)bContainerIndex);
+
+	logprintf(pCardData, 1,
+		  "CardGetContainerInfo bContainerIndex=%u, dwFlags=0x%08X, dwVersion=%lu, cbSigPublicKey=%lu, cbKeyExPublicKey=%lu\n",
+		  (unsigned int)bContainerIndex, (unsigned int)dwFlags,
+		  (unsigned long)pContainerInfo->dwVersion,
+		  (unsigned long)pContainerInfo->cbSigPublicKey,
+		  (unsigned long)pContainerInfo->cbKeyExPublicKey);
 
 err:
 	free(pubkey_der.value);
@@ -6283,7 +6352,8 @@ DWORD WINAPI CardGetProperty(__in PCARD_DATA pCardData,
 		if (cbData < sizeof(*pKeySizes))
 			MD_FUNC_RETURN(pCardData, 1, ERROR_INSUFFICIENT_BUFFER);
 
-		dwret = md_query_key_sizes(pCardData, 0, pKeySizes);
+		/* dwFlags has key_type */
+		dwret = md_query_key_sizes(pCardData, dwFlags, pKeySizes);
 		if (dwret != SCARD_S_SUCCESS)
 			MD_FUNC_RETURN(pCardData, 1, dwret);
 	}
@@ -7160,7 +7230,7 @@ BOOL APIENTRY DllMain( HINSTANCE hinstDLL,
 	case DLL_PROCESS_DETACH:
 		sc_notify_close();
 		if (lpReserved == NULL) {
-#if defined(ENABLE_OPENSSL) && defined(OPENSSL_SECURE_MALLOC_SIZE)
+#if defined(ENABLE_OPENSSL) && defined(OPENSSL_SECURE_MALLOC_SIZE) && !defined(LIBRESSL_VERSION_NUMBER)
 			CRYPTO_secure_malloc_done();
 #endif
 #ifdef ENABLE_OPENPACE

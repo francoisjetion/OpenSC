@@ -13,7 +13,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -1050,6 +1050,20 @@ static int asepcos_card_reader_lock_obtained(sc_card_t *card, int was_reset)
 	LOG_FUNC_RETURN(card->ctx, r);
 }
 
+static int asepcos_logout(sc_card_t *card)
+{
+	int r = SC_ERROR_NOT_SUPPORTED;
+
+	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
+
+	if (card->type == SC_CARD_TYPE_ASEPCOS_JAVA) {
+		/* in case of a Java card try to select the ASEPCOS applet */
+		r = asepcos_select_asepcos_applet(card);
+	}
+
+	LOG_FUNC_RETURN(card->ctx, r);
+}
+
 static struct sc_card_driver * sc_get_driver(void)
 {
 	if (iso_ops == NULL)
@@ -1066,6 +1080,7 @@ static struct sc_card_driver * sc_get_driver(void)
 	asepcos_ops.list_files        = asepcos_list_files;
 	asepcos_ops.card_ctl          = asepcos_card_ctl;
 	asepcos_ops.pin_cmd           = asepcos_pin_cmd;
+	asepcos_ops.logout            = asepcos_logout;
 	asepcos_ops.card_reader_lock_obtained = asepcos_card_reader_lock_obtained;
 
 	return &asepcos_drv;

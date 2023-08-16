@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -127,7 +127,7 @@ int msc_zero_object(sc_card_t *card, msc_id objectId, size_t dataLength)
 {
 	u8 zeroBuffer[MSC_MAX_APDU];
 	size_t i;
-	size_t max_write_unit = MSC_MAX_SEND - 9; /* - 9 for object ID+length */
+	size_t max_write_unit = MIN(MSC_MAX_APDU, MSC_MAX_SEND - 9); /* - 9 for object ID+length */
 
 	memset(zeroBuffer, 0, max_write_unit);
 	for(i = 0; i < dataLength; i += max_write_unit) {
@@ -180,6 +180,9 @@ int msc_partial_update_object(sc_card_t *card, msc_id objectId, int offset, cons
 	u8 buffer[MSC_MAX_APDU];
 	sc_apdu_t apdu;
 	int r;
+
+	if (dataLength + 9 > MSC_MAX_APDU)
+		return SC_ERROR_INVALID_ARGUMENTS;
 
 	sc_format_apdu(card, &apdu, SC_APDU_CASE_3_SHORT, 0x54, 0x00, 0x00);
 	apdu.lc = dataLength + 9;
@@ -624,8 +627,10 @@ int msc_extract_rsa_public_key(sc_card_t *card,
 	if(!*modulus) LOG_FUNC_RETURN(card->ctx, SC_ERROR_OUT_OF_MEMORY);
 	memcpy(*modulus, buffer, *modLength);
 	*expLength = (buffer[*modLength] << 8) | buffer[*modLength + 1];
-	if (*expLength > sizeof buffer)
+	if (*expLength > sizeof buffer) {
+		free(*modulus); *modulus = NULL;
 		return SC_ERROR_OUT_OF_MEMORY;
+	}
 	r = msc_read_object(card, inputId, fileLocation, buffer, *expLength);
 	if(r < 0) {
 		free(*modulus); *modulus = NULL;

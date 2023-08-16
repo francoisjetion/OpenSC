@@ -7,7 +7,7 @@ define([PRODUCT_TARNAME], [opensc])
 define([PRODUCT_BUGREPORT], [https://github.com/OpenSC/OpenSC/issues])
 define([PRODUCT_URL], [https://github.com/OpenSC/OpenSC])
 define([PACKAGE_VERSION_MAJOR], [0])
-define([PACKAGE_VERSION_MINOR], [22])
+define([PACKAGE_VERSION_MINOR], [23])
 define([PACKAGE_VERSION_FIX], [0])
 define([PACKAGE_SUFFIX], [])
 
@@ -21,6 +21,7 @@ define([VS_FF_PRODUCT_URL], [https://github.com/OpenSC/OpenSC])
 
 m4_sinclude(m4/version.m4.ci)
 
+# Hint: MacOSX/build-package.in contains minimum OpenSSL reference
 m4_define([openssl_minimum_version], [1.1.1])
 
 AC_INIT([PRODUCT_NAME],[PACKAGE_VERSION_MAJOR.PACKAGE_VERSION_MINOR.PACKAGE_VERSION_FIX[]PACKAGE_SUFFIX],[PRODUCT_BUGREPORT],[PRODUCT_TARNAME],[PRODUCT_URL])
@@ -45,7 +46,7 @@ OPENSC_VS_FF_PRODUCT_URL="VS_FF_PRODUCT_URL"
 #   (Code changed:                      REVISION++)
 #   (Oldest interface changed/removed:  OLDEST++)
 #   (Interfaces added:                  CURRENT++, REVISION=0)
-OPENSC_LT_CURRENT="8"
+OPENSC_LT_CURRENT="9"
 OPENSC_LT_OLDEST="8"
 OPENSC_LT_REVISION="0"
 OPENSC_LT_AGE="0"
@@ -148,6 +149,8 @@ AX_CODE_COVERAGE()
 
 AX_CHECK_COMPILE_FLAG([-Wunknown-warning-option], [have_unknown_warning_option="yes"], [have_unknown_warning_option="no"])
 AM_CONDITIONAL([HAVE_UNKNOWN_WARNING_OPTION], [test "${have_unknown_warning_option}" = "yes"])
+
+AX_VALGRIND_CHECK()
 
 AC_ARG_ENABLE(
 	[fuzzing],
@@ -271,6 +274,13 @@ AC_ARG_ENABLE(
 )
 
 AC_ARG_ENABLE(
+	[tests],
+	[AS_HELP_STRING([--enable-tests],[enable tests @<:@enabled@:>@])],
+	,
+	[enable_tests="yes"]
+)
+
+AC_ARG_ENABLE(
 	[dnie-ui],
 	[AS_HELP_STRING([--enable-dnie-ui],[enable use of external user interface program to request DNIe pin@<:@disabled@:>@])],
 	,
@@ -288,7 +298,7 @@ AC_ARG_ENABLE(
 	[autostart-items],
 	[AS_HELP_STRING([--enable-autostart-items],[enable autostart items @<:@enabled@:>@])],
 	,
-	[enable_autostart="yes"]
+	[enable_autostart="no"]
 )
 
 AC_ARG_ENABLE(
@@ -431,6 +441,21 @@ AC_CHECK_FUNCS([ \
 	strnlen sigaction
 ])
 
+#
+# Check for __builtin_uadd_overflow
+#
+AC_MSG_CHECKING([compiler support for __builtin_*_overflow()])
+AC_LINK_IFELSE(
+    [AC_LANG_PROGRAM(
+         [[#include <limits.h>]],
+         [[return (__builtin_uadd_overflow(UINT_MAX, UINT_MAX, &(unsigned int){ 0 }));]]
+     )],
+    [AC_MSG_RESULT([yes])
+     AC_DEFINE([HAVE_BUILTIN_OVERFLOW], [1], [define if the compiler supports __builtin_*_overflow().])
+    ],
+    [AC_MSG_RESULT([no])
+    ])
+
 # Do not check for strlcpy and strlcat in Linux because it is not implemented
 # and autotools can not detect it in AC_CHECK_DECLS because build does not fail
 # in this test.
@@ -466,9 +491,20 @@ AC_CHECK_LIB(
 
 if test "${WIN32}" = "no"; then
 	dnl dl support
-	AC_SEARCH_LIBS([dlopen], [dl dld], [], [
-		AC_MSG_ERROR([unable to find the dlopen() function])
-	])
+	AC_ARG_VAR([LDL_LIBS], [linker flags for ldl])
+	if test -z "${LDL_LIBS}"; then
+		AC_CHECK_LIB(
+			[dl],
+			[dlopen],
+			[LDL_LIBS="-ldl"],
+			AC_CHECK_LIB(
+				[dld],
+				[dlopen],
+				[LDL_LIBS="-ldld"],
+				AC_MSG_ERROR([unable to find the dlopen() function])
+			)
+		)
+	fi
 
 	dnl Special check for pthread support.
 	AX_PTHREAD(
@@ -519,7 +555,7 @@ if test "${enable_dnie_ui}" = "yes"; then
 fi
 
 case "${host}" in
-	*-*-darwin*)
+	*-*-darwin*|*-mingw*|*-winnt*|*-cygwin*)
 			have_notify="yes"
 		;;
 	*)
@@ -543,6 +579,8 @@ case "${host}" in
 							   have_notify="no"
 							   have_gio2="no"  ])
 			LIBS="$saved_LIBS"
+			# we do not need glib-2.0
+			GIO2_LIBS=$(echo "$GIO2_LIBS" | sed 's/-lglib-2.0//g')
 		;;
 esac
 
@@ -665,7 +703,7 @@ PKG_CHECK_MODULES(
 	[have_openssl="yes"],
 	[AC_CHECK_LIB(
 		[crypto],
-		[RSA_version],
+		[RSA_get_version],
 		[
 			have_openssl="yes"
 			OPENSSL_LIBS="-lcrypto"
@@ -1059,6 +1097,7 @@ AC_SUBST([WIN_LIBPREFIX])
 AC_SUBST([DEFAULT_PCSC_PROVIDER])
 AC_SUBST([DEFAULT_PKCS11_PROVIDER])
 AC_SUBST([DEFAULT_ONEPIN_PKCS11_PROVIDER])
+AC_SUBST([PKCS11_REGISTER_SKIP_FIREFOX])
 AC_SUBST([OPTIONAL_ZLIB_CFLAGS])
 AC_SUBST([OPTIONAL_ZLIB_LIBS])
 AC_SUBST([OPTIONAL_READLINE_CFLAGS])
@@ -1084,9 +1123,11 @@ AM_CONDITIONAL([ENABLE_ZLIB], [test "${enable_zlib}" = "yes"])
 AM_CONDITIONAL([ENABLE_READLINE], [test "${enable_readline}" = "yes"])
 AM_CONDITIONAL([ENABLE_OPENSSL], [test "${enable_openssl}" = "yes"])
 AM_CONDITIONAL([ENABLE_OPENPACE], [test "${enable_openpace}" = "yes"])
+AM_CONDITIONAL([ENABLE_NOTIFY], [test "${enable_notify}" = "yes"])
 AM_CONDITIONAL([ENABLE_CRYPTOTOKENKIT], [test "${enable_cryptotokenkit}" = "yes"])
 AM_CONDITIONAL([ENABLE_OPENCT], [test "${enable_openct}" = "yes"])
 AM_CONDITIONAL([ENABLE_DOC], [test "${enable_doc}" = "yes"])
+AM_CONDITIONAL([ENABLE_TESTS], [test "${enable_tests}" = "yes"])
 AM_CONDITIONAL([WIN32], [test "${WIN32}" = "yes"])
 AM_CONDITIONAL([CYGWIN], [test "${CYGWIN}" = "yes"])
 AM_CONDITIONAL([ENABLE_MINIDRIVER], [test "${enable_minidriver}" = "yes"])
@@ -1150,6 +1191,7 @@ AC_CONFIG_FILES([
 	MacOSX/Makefile
 	MacOSX/build-package
 	MacOSX/Distribution.xml
+	MacOSX/Distribution_universal.xml
 	MacOSX/resources/Welcome.html
 ])
 
@@ -1180,6 +1222,7 @@ XSL stylesheets:         ${xslstylesheetsdir}
 
 man support:             ${enable_man}
 doc support:             ${enable_doc}
+tests:                   ${enable_tests}
 thread locking support:  ${enable_thread_locking}
 zlib support:            ${enable_zlib}
 readline support:        ${enable_readline}
@@ -1208,6 +1251,7 @@ Compiler flags:          ${CFLAGS}
 Linker flags:            ${LDFLAGS}
 Libraries:               ${LIBS}
 
+LDL_LIBS:                ${LDL_LIBS}
 READLINE_CFLAGS:         ${READLINE_CFLAGS}
 READLINE_LIBS:           ${READLINE_LIBS}
 ZLIB_CFLAGS:             ${ZLIB_CFLAGS}

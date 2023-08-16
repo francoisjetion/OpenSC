@@ -1,7 +1,7 @@
 /*
  * Oberthur specific operation for PKCS #15 initialization
  *
- * Copyright (C) 2002  Juha Yrjölä <juha.yrjola@iki.fi>
+ * Copyright (C) 2002  Juha YrjÃ¶lÃ¤ <juha.yrjola@iki.fi>
  * Copyright (C) 2009  Viktor Tarasov <viktor.tarasov@opentrust.com>,
  *                     OpenTrust <www.opentrust.com>
  *
@@ -17,7 +17,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "pkcs15-oberthur.h"
@@ -134,6 +134,9 @@ cosm_delete_file(struct sc_pkcs15_card *p15card, struct sc_profile *profile,
 
 	/* Select the parent DF */
 	path = df->path;
+	if (path.len < 2) {
+		LOG_FUNC_RETURN(ctx, SC_ERROR_INVALID_ARGUMENTS);
+	}
 	path.len -= 2;
 
 	rv = sc_select_file(p15card->card, &path, &parent);
@@ -277,7 +280,7 @@ cosm_create_reference_data(struct sc_profile *profile, struct sc_pkcs15_card *p1
 	};
 
 	SC_FUNC_CALLED(ctx, SC_LOG_DEBUG_VERBOSE);
-	sc_log(ctx, 
+	sc_log(ctx,
 		 "pin lens %"SC_FORMAT_LEN_SIZE_T"u/%"SC_FORMAT_LEN_SIZE_T"u",
 		 pin_len, puk_len);
 	if (!pin || pin_len>0x40)
@@ -533,7 +536,7 @@ cosm_new_file(struct sc_profile *profile, struct sc_card *card,
 		file->ef_structure = structure;
 	}
 
-	sc_log(card->ctx, 
+	sc_log(card->ctx,
 		 "cosm_new_file() file size %"SC_FORMAT_LEN_SIZE_T"u; ef type %i/%i; id %04X",
 		 file->size, file->type, file->ef_structure, file->id);
 	*out = file;
@@ -569,6 +572,10 @@ cosm_get_temporary_public_key_file(struct sc_card *card,
 	file->size = prvkey_file->size;
 
 	entry = sc_file_get_acl_entry(prvkey_file, SC_AC_OP_UPDATE);
+	if (!entry) {
+		sc_file_free(file);
+		LOG_TEST_RET(ctx, SC_ERROR_OBJECT_NOT_FOUND, "Failed to find ACL entry");
+	}
 	rv = sc_file_add_acl_entry(file, SC_AC_OP_UPDATE, entry->method, entry->key_ref);
 	if (!rv)
 		rv = sc_file_add_acl_entry(file, SC_AC_OP_PSO_ENCRYPT, SC_AC_NONE, 0);
@@ -622,9 +629,13 @@ cosm_generate_key(struct sc_profile *profile, struct sc_pkcs15_card *p15card,
 
 	/* In the private key DF create the temporary public RSA file. */
 	rv = cosm_get_temporary_public_key_file(p15card->card, prkf, &tmpf);
+	if (rv != SC_SUCCESS)
+		sc_file_free(prkf);
 	LOG_TEST_RET(ctx, rv, "Error while getting temporary public key file");
 
 	rv = sc_pkcs15init_create_file(profile, p15card, tmpf);
+	if (rv != SC_SUCCESS)
+		sc_file_free(prkf);
 	LOG_TEST_RET(ctx, rv, "cosm_generate_key() failed to create temporary public key EF");
 
 	memset(&args, 0, sizeof(args));
@@ -634,24 +645,41 @@ cosm_generate_key(struct sc_profile *profile, struct sc_pkcs15_card *p15card,
 	args.key_bits = key_info->modulus_length;
 	args.pubkey_len = key_info->modulus_length / 8;
 	args.pubkey = malloc(key_info->modulus_length / 8);
-	if (!args.pubkey)
+	if (!args.pubkey) {
+		sc_file_free(prkf);
+		sc_file_free(tmpf);
 		LOG_TEST_RET(ctx, SC_ERROR_OUT_OF_MEMORY, "cosm_generate_key() cannot allocate pubkey");
+	}
 
 	rv = sc_card_ctl(p15card->card, SC_CARDCTL_OBERTHUR_GENERATE_KEY, &args);
+	if (rv != SC_SUCCESS) {
+		sc_file_free(prkf);
+		sc_file_free(tmpf);
+		free(args.pubkey);
+	}
 	LOG_TEST_RET(ctx, rv, "cosm_generate_key() CARDCTL_OBERTHUR_GENERATE_KEY failed");
 
 	/* extract public key */
 	pubkey->algorithm = SC_ALGORITHM_RSA;
 	pubkey->u.rsa.modulus.len   = key_info->modulus_length / 8;
 	pubkey->u.rsa.modulus.data  = malloc(key_info->modulus_length / 8);
-	if (!pubkey->u.rsa.modulus.data)
+	if (!pubkey->u.rsa.modulus.data) {
+		sc_file_free(prkf);
+		sc_file_free(tmpf);
+		free(args.pubkey);
 		LOG_TEST_RET(ctx, SC_ERROR_OUT_OF_MEMORY, "cosm_generate_key() cannot allocate modulus buf");
+	}
 
 	/* FIXME and if the exponent length is not 3? */
 	pubkey->u.rsa.exponent.len  = 3;
 	pubkey->u.rsa.exponent.data = malloc(3);
-	if (!pubkey->u.rsa.exponent.data)
+	if (!pubkey->u.rsa.exponent.data) {
+		sc_file_free(prkf);
+		sc_file_free(tmpf);
+		free(args.pubkey);
+		free(pubkey->u.rsa.modulus.data);
 		LOG_TEST_RET(ctx, SC_ERROR_OUT_OF_MEMORY, "cosm_generate_key() cannot allocate exponent buf");
+	}
 	memcpy(pubkey->u.rsa.exponent.data, "\x01\x00\x01", 3);
 	memcpy(pubkey->u.rsa.modulus.data, args.pubkey, args.pubkey_len);
 
@@ -663,6 +691,7 @@ cosm_generate_key(struct sc_profile *profile, struct sc_pkcs15_card *p15card,
 
 	sc_file_free(tmpf);
 	sc_file_free(prkf);
+	free(args.pubkey);
 
 	LOG_FUNC_RETURN(ctx, rv);
 }

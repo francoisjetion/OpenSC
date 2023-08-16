@@ -44,8 +44,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size)
 	if (fuzz_connect_card(ctx, &card, NULL, Data, Size) != SC_SUCCESS)
 		goto err;
 
-	sc_pkcs15_bind(card, NULL, &p15card);
-	if (!p15card)
+	if (sc_pkcs15_bind(card, NULL, &p15card) != 0)
 		goto err;
 
 	for (obj = p15card->obj_list; obj != NULL; obj = obj->next) {
@@ -81,8 +80,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size)
 	sc_pkcs15_encode_unusedspace(ctx, p15card, &unused_space, &unused_space_len);
 	free(unused_space);
 
-	sc_pkcs15_card_free(p15card);
 err:
+	sc_pkcs15_card_free(p15card);
 	sc_disconnect_card(card);
 	sc_release_context(ctx);
 

@@ -26,7 +26,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -453,22 +453,6 @@ main(int argc, char **argv)
 	int					r = 0;
 	struct sc_pkcs15_card *tmp_p15_data = NULL;
 
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-	OPENSSL_config(NULL);
-#endif
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L && !(defined LIBRESSL_VERSION_NUMBER)
-	/* Openssl 1.1.0 magic */
-	OPENSSL_init_crypto(OPENSSL_INIT_LOAD_CRYPTO_STRINGS
-		| OPENSSL_INIT_ADD_ALL_CIPHERS
-		| OPENSSL_INIT_ADD_ALL_DIGESTS
-		| OPENSSL_INIT_LOAD_CONFIG,
-		NULL);
-#else
-	/* OpenSSL magic */
-	OpenSSL_add_all_algorithms();
-	OPENSSL_malloc_init();
-#endif
-
 #ifdef RANDOM_POOL
 	if (!RAND_load_file(RANDOM_POOL, 32))
 		util_fatal("Unable to seed random number pool for key generation");
@@ -663,6 +647,9 @@ open_reader_and_card(char *reader)
 	memset(&ctx_param, 0, sizeof(ctx_param));
 	ctx_param.ver      = 0;
 	ctx_param.app_name = app_name;
+	ctx_param.debug    = verbose;
+	if (verbose)
+		ctx_param.debug_file = stderr;
 
 	r = sc_context_create(&g_ctx, &ctx_param);
 	if (r) {
@@ -670,7 +657,7 @@ open_reader_and_card(char *reader)
 		return 0;
 	}
 
-	if (util_connect_card_ex(g_ctx, &g_card, reader, opt_wait, 0, verbose))
+	if (util_connect_card_ex(g_ctx, &g_card, reader, opt_wait, 0))
 		return 0;
 
 	return 1;
@@ -1167,6 +1154,7 @@ is_cacert_already_present(struct sc_pkcs15init_certargs *args)
 
 	count = r;
 	for (i = 0; i < count; i++) {
+		int private_obj;
 		cinfo = (sc_pkcs15_cert_info_t *) objs[i]->data;
 
 		if (!cinfo->authority)
@@ -1176,7 +1164,8 @@ is_cacert_already_present(struct sc_pkcs15init_certargs *args)
 		/* XXX we should also match the usage field here */
 
 		/* Compare the DER representation of the certificates */
-		r = sc_pkcs15_read_certificate(g_p15card, cinfo, &cert);
+		private_obj = objs[i]->flags & SC_PKCS15_CO_FLAG_PRIVATE;
+		r = sc_pkcs15_read_certificate(g_p15card, cinfo, private_obj, &cert);
 		if (r < 0 || !cert)
 			continue;
 
@@ -1344,19 +1333,15 @@ do_read_check_certificate(sc_pkcs15_cert_t *sc_oldcert,
 	/* Compare the public keys, there's no high level openssl function for this(?) */
 	/* Yes there is in 1.0.2 and above EVP_PKEY_cmp */
 
-
 	r = SC_ERROR_INVALID_ARGUMENTS;
 	if (oldpk_type == newpk_type)
 	{
-#if  OPENSSL_VERSION_NUMBER >= 0x10002000L
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L && !defined(LIBRESSL_VERSION_NUMBER)
 		if (EVP_PKEY_eq(oldpk, newpk) == 1)
-			r = 0;
 #else
-		if ((oldpk_type == EVP_PKEY_RSA) &&
-			!BN_cmp(EVP_PKEY_get0_RSA(oldpk)->n, EVP_PKEY_get0_RSA(newpk)->n) &&
-			!BN_cmp(EVP_PKEY_get0_RSA(oldpk)->e, EVP_PKEY_get0_RSA(newpk)->e))
-				r = 0;
+		if (EVP_PKEY_cmp(oldpk, newpk) == 1)
 #endif
+		r = 0;
 	}
 
 	EVP_PKEY_free(newpk);
@@ -1386,6 +1371,7 @@ do_update_certificate(struct sc_profile *profile)
 	sc_pkcs15_cert_t *oldcert = NULL;
 	sc_pkcs15_der_t newcert_raw;
 	int r;
+	int private_obj;
 
 	if (opt_objectid == NULL) {
 		util_error("no ID given for the cert: use --id");
@@ -1404,7 +1390,8 @@ do_update_certificate(struct sc_profile *profile)
 		return r;
 
 	certinfo = (sc_pkcs15_cert_info_t *) obj->data;
-	r = sc_pkcs15_read_certificate(g_p15card, certinfo, &oldcert);
+	private_obj = obj->flags & SC_PKCS15_CO_FLAG_PRIVATE;
+	r = sc_pkcs15_read_certificate(g_p15card, certinfo, private_obj, &oldcert);
 	if (r < 0)
 		goto err;
 
@@ -1501,12 +1488,14 @@ static int get_cert_info(sc_pkcs15_card_t *myp15card, sc_pkcs15_object_t *certob
 	sc_pkcs15_object_t *otherobj;
 	sc_pkcs15_cert_t *othercert = NULL;
 	int r;
+	int private_obj;
 
 	*issuercert = NULL;
 	*has_sibling = 0;
 	*stop = 0;
 
-	r = sc_pkcs15_read_certificate(myp15card, (sc_pkcs15_cert_info_t *) certobj->data, &cert);
+	private_obj = certobj->flags & SC_PKCS15_CO_FLAG_PRIVATE;
+	r = sc_pkcs15_read_certificate(myp15card, (sc_pkcs15_cert_info_t *) certobj->data, private_obj, &cert);
 	if (r < 0)
 		return r;
 
@@ -1522,7 +1511,9 @@ static int get_cert_info(sc_pkcs15_card_t *myp15card, sc_pkcs15_object_t *certob
 			sc_pkcs15_free_certificate(othercert);
 			othercert=NULL;
 		}
-		r = sc_pkcs15_read_certificate(myp15card, (sc_pkcs15_cert_info_t *) otherobj->data, &othercert);
+
+		private_obj = otherobj->flags & SC_PKCS15_CO_FLAG_PRIVATE;
+		r = sc_pkcs15_read_certificate(myp15card, (sc_pkcs15_cert_info_t *) otherobj->data, private_obj, &othercert);
 		if (r < 0 || !othercert)
 			goto done;
 		if ((cert->issuer_len == othercert->subject_len) &&
@@ -2969,13 +2960,7 @@ next: ;
 static void
 ossl_print_errors(void)
 {
-	static int	loaded = 0;
 	long		err;
-
-	if (!loaded) {
-		ERR_load_crypto_strings();
-		loaded = 1;
-	}
 
 	while ((err = ERR_get_error()) != 0)
 		fprintf(stderr, "%s\n", ERR_error_string(err, NULL));

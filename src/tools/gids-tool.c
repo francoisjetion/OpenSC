@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -525,26 +525,13 @@ int main(int argc, char * argv[])
 		}
 	}
 
-
 	/* OpenSSL magic */
-#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
-	OPENSSL_config(NULL);
-#endif
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L && !defined(LIBRESSL_VERSION_NUMBER)
-	OPENSSL_init_crypto(OPENSSL_INIT_LOAD_CRYPTO_STRINGS
-		| OPENSSL_INIT_ADD_ALL_CIPHERS
-		| OPENSSL_INIT_ADD_ALL_DIGESTS,
-               NULL);
-#else
-	/* OpenSSL magic */
-	OPENSSL_malloc_init();
-
-	ERR_load_crypto_strings();
-	OpenSSL_add_all_algorithms();
-#endif
 
 	memset(&ctx_param, 0, sizeof(sc_context_param_t));
 	ctx_param.app_name = app_name;
+	ctx_param.debug    = verbose;
+	if (verbose)
+		ctx_param.debug_file = stderr;
 
 	r = sc_context_create(&ctx, &ctx_param);
 	if (r != SC_SUCCESS) {
@@ -552,7 +539,7 @@ int main(int argc, char * argv[])
 		exit(1);
 	}
 
-	r = util_connect_card(ctx, &card, opt_reader, opt_wait, verbose);
+	r = util_connect_card(ctx, &card, opt_reader, opt_wait);
 	if (r != SC_SUCCESS) {
 		if (r < 0) {
 			fprintf(stderr, "Failed to connect to card: %s\n", sc_strerror(err));

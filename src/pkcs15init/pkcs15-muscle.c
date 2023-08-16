@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -53,6 +53,7 @@ static int muscle_erase_card(sc_profile_t *profile, sc_pkcs15_card_t *p15card)
 		sc_file_free(file);
 		return r;
 	}
+	sc_file_free(file);
 	if ((r = sc_delete_file(p15card->card, &path)) < 0)
 		return r;
 	return 0;
@@ -78,6 +79,8 @@ muscle_create_dir(sc_profile_t *profile, sc_pkcs15_card_t *p15card, sc_file_t *d
 		sc_file_free(file);
 		return r;
 	}
+	sc_file_free(file);
+
 	/* Create the application DF */
 	if ((r = sc_pkcs15init_create_file(profile, p15card, df)) < 0)
 		return r;
@@ -101,10 +104,13 @@ muscle_create_pin(sc_profile_t *profile, sc_pkcs15_card_t *p15card,
 
 	if ((r = sc_select_file(p15card->card, &df->path, &file)) < 0)
 		return r;
-	if ((r = sc_pkcs15init_authenticate(profile, p15card, file, SC_AC_OP_WRITE)) < 0)
+	if ((r = sc_pkcs15init_authenticate(profile, p15card, file, SC_AC_OP_WRITE)) < 0) {
+		sc_file_free(file);
 		return r;
+	}
 
 	auth_info->attrs.pin.flags &= ~SC_PKCS15_PIN_FLAG_LOCAL;
+	sc_file_free(file);
 	return 0;
 }
 

@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifndef _OPENSC_CARDCTL_H
@@ -41,6 +41,7 @@ enum {
 	SC_CARDCTL_LIFECYCLE_GET,
 	SC_CARDCTL_LIFECYCLE_SET,
 	SC_CARDCTL_GET_SERIALNR,
+	SC_CARDCTL_GET_CHANGE_COUNTER,
 	SC_CARDCTL_GET_SE_INFO,
 	SC_CARDCTL_GET_CHV_REFERENCE_IN_SE,
 	SC_CARDCTL_PKCS11_INIT_TOKEN,
@@ -252,6 +253,7 @@ enum {
 	SC_CARDCTL_OPENPGP_BASE = _CTL_PREFIX('P', 'G', 'P'),
 	SC_CARDCTL_OPENPGP_GENERATE_KEY,
 	SC_CARDCTL_OPENPGP_STORE_KEY,
+	SC_CARDCTL_OPENPGP_SELECT_DATA,
 
 	/*
 	 * SmartCard-HSM
@@ -304,6 +306,7 @@ enum {
 	SC_CARDCTL_IDPRIME_GET_NEXT_OBJECT,
 	SC_CARDCTL_IDPRIME_FINAL_GET_OBJECTS,
 	SC_CARDCTL_IDPRIME_GET_TOKEN_NAME,
+	SC_CARDCTL_IDPRIME_GET_PIN_ID,
 
 };
 
@@ -915,7 +918,8 @@ typedef struct sc_cardctl_piv_genkey_info_st {
 	unsigned int	key_num;
 	unsigned int	key_algid;	/* RSA 5, 6, 7; EC 11, 14 */ 
 	unsigned int	key_bits;	/* RSA */
-	unsigned long	exponent;	/* RSA */
+	unsigned char *	exponent;	/* RSA */
+	unsigned int	exponent_len;	/* RSA */
 	unsigned char *	pubkey;		/* RSA */
 	unsigned int	pubkey_len;	/* RSA */
 	unsigned char * ecparam;        /* EC */
@@ -1055,6 +1059,7 @@ typedef struct sc_cardctl_sc_hsm_pka_register {
  */
 
 #define SC_ISOAPPLET_ALG_REF_RSA_GEN_2048 0xF3
+#define SC_ISOAPPLET_ALG_REF_RSA_GEN_4096 0xF5
 #define SC_ISOAPPLET_ALG_REF_EC_GEN 0xEC
 
 typedef struct sc_cardctl_isoApplet_ec_parameters {

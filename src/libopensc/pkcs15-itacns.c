@@ -17,7 +17,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 /*
@@ -62,14 +62,15 @@ const char * itacns_mask_manufacturers[] = {
 	"Gemplus",
 	"Ghirlanda",
 	"Giesecke & Devrient",
-	"Oberthur Card Systems",
+	"IDEMIA (Oberthur)",
 	"Orga",
 	"Axalto",
 	"Siemens",
 	"STIncard",
 	"GEP",
 	"EPS Corp",
-	"Athena"
+	"Athena",
+	"Gemalto",
 };
 
 const char * iso7816_ic_manufacturers[] = {
@@ -198,6 +199,7 @@ static int itacns_add_cert(sc_pkcs15_card_t *p15card,
 #ifdef ENABLE_OPENSSL
 	X509 *x509;
 	sc_pkcs15_cert_t *cert;
+	int private_obj;
 #endif
 
 	SC_FUNC_CALLED(p15card->card->ctx, SC_LOG_DEBUG_NORMAL);
@@ -220,16 +222,11 @@ static int itacns_add_cert(sc_pkcs15_card_t *p15card,
 		info.path = *path;
 
 	strlcpy(obj.label, label, sizeof(obj.label));
-	obj.flags = obj_flags;
-
-	r = sc_pkcs15emu_add_x509_cert(p15card, &obj, &info);
-	LOG_TEST_RET(p15card->card->ctx, r,
-		"Could not add X.509 certificate");
 
 	/* If we have OpenSSL, read keyUsage */
 #ifdef ENABLE_OPENSSL
-
-	r = sc_pkcs15_read_certificate(p15card, &info, &cert);
+	private_obj = obj_flags & SC_PKCS15_CO_FLAG_PRIVATE;
+	r = sc_pkcs15_read_certificate(p15card, &info, private_obj, &cert);
 	LOG_TEST_RET(p15card->card->ctx, r,
 		"Could not read X.509 certificate");
 
@@ -253,14 +250,14 @@ static int itacns_add_cert(sc_pkcs15_card_t *p15card,
 	}
 	OPENSSL_free(x509);
 
-	return SC_SUCCESS;
-
-#else /* ENABLE_OPENSSL */
-
-	return SC_SUCCESS;
-
 #endif /* ENABLE_OPENSSL */
 
+	obj.flags = obj_flags;
+	r = sc_pkcs15emu_add_x509_cert(p15card, &obj, &info);
+	LOG_TEST_RET(p15card->card->ctx, r,
+		"Could not add X.509 certificate");
+
+	return r;
 }
 
 static int itacns_add_pubkey(sc_pkcs15_card_t *p15card,
@@ -493,6 +490,7 @@ static int itacns_add_data_files(sc_pkcs15_card_t *p15card)
 	sc_pkcs15_data_info_t dinfo;
 	struct sc_pkcs15_object *objs[32];
 	struct sc_pkcs15_data_info *cinfo;
+	int private_obj;
 
 	for(i=0; i < array_size; i++) {
 		sc_path_t path;
@@ -548,7 +546,8 @@ static int itacns_add_data_files(sc_pkcs15_card_t *p15card)
 		return SC_SUCCESS;
 	}
 
-	rv = sc_pkcs15_read_data_object(p15card, cinfo, &p15_personaldata);
+	private_obj = objs[i]->flags & SC_PKCS15_CO_FLAG_PRIVATE;
+	rv = sc_pkcs15_read_data_object(p15card, cinfo, private_obj, &p15_personaldata);
 	if (rv) {
 		sc_log(p15card->card->ctx,
 			"Could not read EF_DatiPersonali: "
@@ -850,6 +849,14 @@ static int itacns_init(sc_pkcs15_card_t *p15card)
 		0, "3F0014009010", "3F00140081108010", "3F0014008110",
 		0x1a, &found_certs);
 	LOG_TEST_GOTO_ERR(p15card->card->ctx, r,
+		"Could not add CNS1");
+	certificate_count += found_certs;
+
+	/* Idemia card */
+	r = itacns_check_and_add_keyset(p15card, "CNS1", 0x02,
+		0, "3F00140090012002", "3F0011001102", "3F0014009002",
+		0x10, &found_certs);
+	LOG_TEST_RET(p15card->card->ctx, r,
 		"Could not add CNS1");
 	certificate_count += found_certs;
 

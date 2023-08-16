@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -311,7 +311,7 @@ static int pcsc_transmit(sc_reader_t *reader, sc_apdu_t *apdu)
 	 * The buffer for the returned data needs to be at least 2 bytes
 	 * larger than the expected data length to store SW1 and SW2. */
 	rsize = rbuflen = apdu->resplen <= 256 ? 258 : apdu->resplen + 2;
-	rbuf     = malloc(rbuflen);
+	rbuf = malloc(rbuflen);
 	if (rbuf == NULL) {
 		r = SC_ERROR_OUT_OF_MEMORY;
 		goto out;
@@ -364,7 +364,7 @@ static int refresh_attributes(sc_reader_t *reader)
 	if (reader->ctx->flags & SC_CTX_FLAG_TERMINATE)
 		return SC_ERROR_NOT_ALLOWED;
 
-	if (priv->reader_state.szReader == NULL || reader->ctx->flags & SC_READER_REMOVED) {
+	if (priv->reader_state.szReader == NULL || reader->flags & SC_READER_REMOVED) {
 		priv->reader_state.szReader = reader->name;
 		priv->reader_state.dwCurrentState = SCARD_STATE_UNAWARE;
 		priv->reader_state.dwEventState = SCARD_STATE_UNAWARE;
@@ -386,7 +386,7 @@ static int refresh_attributes(sc_reader_t *reader)
 			}
 			LOG_FUNC_RETURN(reader->ctx, SC_SUCCESS);
 		}
-		
+
 		/* the system could not detect the reader. It means, the prevoiusly attached reader is disconnected. */
 		if (rv == (LONG)SCARD_E_UNKNOWN_READER
 #ifdef SCARD_E_NO_READERS_AVAILABLE
@@ -394,6 +394,8 @@ static int refresh_attributes(sc_reader_t *reader)
 #endif
 				|| rv == (LONG)SCARD_E_SERVICE_STOPPED) {
  			reader->flags &= ~(SC_READER_CARD_PRESENT);
+			reader->flags |= SC_READER_REMOVED;
+			priv->gpriv->removed_reader = reader;
  			SC_FUNC_RETURN(reader->ctx, SC_LOG_DEBUG_VERBOSE, SC_SUCCESS);
  		}
 
@@ -424,7 +426,7 @@ static int refresh_attributes(sc_reader_t *reader)
 		if (priv->reader_state.cbAtr > SC_MAX_ATR_SIZE)
 			return SC_ERROR_INTERNAL;
 
-		/* Some cards have a different cold (after a powerup) and warm (after a reset) ATR  */
+		/* Some cards have a different cold (after a powerup) and warm (after a reset) ATR */
 		if (memcmp(priv->reader_state.rgbAtr, reader->atr.value, priv->reader_state.cbAtr) != 0) {
 			reader->atr.len = priv->reader_state.cbAtr;
 			memcpy(reader->atr.value, priv->reader_state.rgbAtr, reader->atr.len);
@@ -556,7 +558,7 @@ static int pcsc_reconnect(sc_reader_t * reader, DWORD action)
 			priv->gpriv->connect_exclusive ? SCARD_SHARE_EXCLUSIVE : SCARD_SHARE_SHARED,
 			protocol, action, &active_proto);
 
-	
+
 	PCSC_TRACE(reader, "SCardReconnect returned", rv);
 	if (rv != SCARD_S_SUCCESS) {
 		PCSC_TRACE(reader, "SCardReconnect failed", rv);
@@ -593,7 +595,7 @@ static void initialize_uid(sc_reader_t *reader)
 			sc_log_hex(reader->ctx, "UID",
 					reader->uid.value, reader->uid.len);
 		} else {
-			sc_log(reader->ctx,  "unable to get UID");
+			sc_log(reader->ctx, "unable to get UID");
 		}
 	}
 }
@@ -672,7 +674,7 @@ static int pcsc_disconnect(sc_reader_t * reader)
 		LONG rv = priv->gpriv->SCardDisconnect(priv->pcsc_card, priv->gpriv->disconnect_action);
 		PCSC_TRACE(reader, "SCardDisconnect returned", rv);
 	}
-	reader->flags = 0;
+	reader->flags &= SC_READER_REMOVED;
 	return SC_SUCCESS;
 }
 
@@ -1177,7 +1179,7 @@ static void detect_reader_features(sc_reader_t *reader, SCARDHANDLE card_handle)
 			priv->modify_ioctl_finish = ntohl(pcsc_tlv->value);
 		} else if (pcsc_tlv->tag == FEATURE_IFD_PIN_PROPERTIES) {
 			priv->pin_properties_ioctl = ntohl(pcsc_tlv->value);
-		} else if (pcsc_tlv->tag == FEATURE_GET_TLV_PROPERTIES)  {
+		} else if (pcsc_tlv->tag == FEATURE_GET_TLV_PROPERTIES) {
 			priv->get_tlv_properties = ntohl(pcsc_tlv->value);
 		} else if (pcsc_tlv->tag == FEATURE_EXECUTE_PACE) {
 			priv->pace_ioctl = ntohl(pcsc_tlv->value);
@@ -1240,11 +1242,11 @@ static void detect_reader_features(sc_reader_t *reader, SCARDHANDLE card_handle)
 					sc_log(ctx, "Reader has a display: %04X", caps->wLcdLayout);
 					reader->capabilities |= SC_READER_CAP_DISPLAY;
 				}
-				else   {
+				else {
 					sc_log(ctx, "Reader does not have a display.");
 				}
 			}
-			else   {
+			else {
 				sc_log(ctx,
 						"Returned PIN properties structure has bad length (%lu/%"SC_FORMAT_LEN_SIZE_T"u)",
 						(unsigned long)rcount,
@@ -1266,34 +1268,55 @@ static void detect_reader_features(sc_reader_t *reader, SCARDHANDLE card_handle)
 		}
 	}
 
+	size_t max_send_size = 0;
+	size_t max_recv_size = 0;
 	if (priv->get_tlv_properties) {
 		/* Try to set reader max_send_size and max_recv_size based on
 		 * detected max_data */
-		int max_data = part10_detect_max_data(reader, card_handle);
-
-		if (max_data > 0) {
-			sc_log(ctx, "Reader supports transceiving %d bytes of data",
-					max_data);
-			if (!priv->gpriv->force_max_send_size)
-				reader->max_send_size = max_data;
-			else
-				sc_log(ctx, "Sending is limited to %"SC_FORMAT_LEN_SIZE_T"u bytes of data"
-						" in configuration file", reader->max_send_size);
-			if (!priv->gpriv->force_max_recv_size)
-				reader->max_recv_size = max_data;
-			else
-				sc_log(ctx, "Receiving is limited to %"SC_FORMAT_LEN_SIZE_T"u bytes of data"
-						" in configuration file", reader->max_recv_size);
-		} else {
-			sc_log(ctx, "Assuming that the reader supports transceiving "
-					"short length APDUs only");
-		}
+		max_send_size = max_recv_size = part10_detect_max_data(reader, card_handle);
 
 		/* debug the product and vendor ID of the reader */
 		part10_get_vendor_product(reader, card_handle, NULL, NULL);
 	}
+	else {
+		/* Try to set default limits based on device name */
+		if (!strncmp("REINER SCT cyberJack", reader->name, 20)) {
+			max_send_size = 1014;
+			max_recv_size = 1014;
+		}
+		else if (!strncmp("Secure Flash Card", reader->name, 17)) {
+			max_send_size = 478;
+			max_recv_size = 506;
+		}
+	}
 
-	if(gpriv->SCardGetAttrib != NULL) {
+	if (max_send_size > 0) {
+		sc_log(ctx, "Reader supports sending %"SC_FORMAT_LEN_SIZE_T"u bytes of data",
+				max_send_size);
+		if (!priv->gpriv->force_max_send_size)
+			reader->max_send_size = max_send_size;
+		else
+			sc_log(ctx, "Sending is limited to %"SC_FORMAT_LEN_SIZE_T"u bytes of data"
+					" in configuration file", reader->max_send_size);
+	} else {
+		sc_log(ctx, "Assuming that the reader supports sending "
+				"short length APDUs only");
+	}
+
+	if (max_recv_size > 0) {
+		sc_log(ctx, "Reader supports receiving %"SC_FORMAT_LEN_SIZE_T"u bytes of data",
+				max_recv_size);
+		if (!priv->gpriv->force_max_recv_size)
+			reader->max_recv_size = max_recv_size;
+		else
+			sc_log(ctx, "Receiving is limited to %"SC_FORMAT_LEN_SIZE_T"u bytes of data"
+					" in configuration file", reader->max_recv_size);
+	} else {
+		sc_log(ctx, "Assuming that the reader supports receiving "
+				"short length APDUs only");
+	}
+
+	if (gpriv->SCardGetAttrib != NULL) {
 		rcount = sizeof(buf);
 		if (gpriv->SCardGetAttrib(card_handle, SCARD_ATTR_VENDOR_NAME,
 					buf, &rcount) == SCARD_S_SUCCESS
@@ -1304,7 +1327,7 @@ static void detect_reader_features(sc_reader_t *reader, SCARDHANDLE card_handle)
 		}
 
 		rcount = sizeof i;
-		if(gpriv->SCardGetAttrib(card_handle, SCARD_ATTR_VENDOR_IFD_VERSION,
+		if (gpriv->SCardGetAttrib(card_handle, SCARD_ATTR_VENDOR_IFD_VERSION,
 					(u8 *) &i, &rcount) == SCARD_S_SUCCESS
 				&& rcount == sizeof i) {
 			reader->version_major = (i >> 24) & 0xFF;
@@ -1314,7 +1337,7 @@ static void detect_reader_features(sc_reader_t *reader, SCARDHANDLE card_handle)
 }
 
 int pcsc_add_reader(sc_context_t *ctx,
-	   	char *reader_name, size_t reader_name_len,
+		char *reader_name, size_t reader_name_len,
 		sc_reader_t **out_reader)
 {
 	int ret = SC_ERROR_INTERNAL;
@@ -1574,7 +1597,7 @@ static int pcsc_wait_for_event(sc_context_t *ctx, unsigned int event_mask, sc_re
 
 	LOG_FUNC_CALLED(ctx);
 
-	if (!event_reader && !event && reader_states)   {
+	if (!event_reader && !event && reader_states) {
 		sc_log(ctx, "free allocated reader states");
 		free(*reader_states);
 		*reader_states = NULL;
@@ -1684,7 +1707,7 @@ static int pcsc_wait_for_event(sc_context_t *ctx, unsigned int event_mask, sc_re
 			state = rsp->dwEventState;
 			rsp->dwCurrentState = rsp->dwEventState;
 			if (state & SCARD_STATE_CHANGED) {
-				/* check for hotplug events  */
+				/* check for hotplug events */
 				if (!strcmp(rsp->szReader, "\\\\?PnP?\\Notification")) {
 					sc_log(ctx, "detected hotplug event");
 					/* Windows sends hotplug event on both, attaching and
@@ -1859,7 +1882,7 @@ static int part10_build_verify_pin_block(struct sc_reader *reader, u8 * buf, siz
 	u8 tmp;
 	unsigned int tmp16;
 	unsigned int off;
-	PIN_VERIFY_STRUCTURE *pin_verify  = (PIN_VERIFY_STRUCTURE *)buf;
+	PIN_VERIFY_STRUCTURE *pin_verify = (PIN_VERIFY_STRUCTURE *)buf;
 
 	/* PIN verification control message */
 	pin_verify->bTimerOut = SC_CCID_PIN_TIMEOUT;
@@ -1958,7 +1981,7 @@ static int part10_build_modify_pin_block(struct sc_reader *reader, u8 * buf, siz
 	sc_apdu_t *apdu = data->apdu;
 	u8 tmp;
 	unsigned int tmp16;
-	PIN_MODIFY_STRUCTURE *pin_modify  = (PIN_MODIFY_STRUCTURE *)buf;
+	PIN_MODIFY_STRUCTURE *pin_modify = (PIN_MODIFY_STRUCTURE *)buf;
 	struct sc_pin_cmd_pin *pin_ref =
 		data->flags & SC_PIN_CMD_IMPLICIT_CHANGE ?
 		&data->pin2 : &data->pin1;
@@ -2569,7 +2592,7 @@ int pcsc_use_reader(sc_context_t *ctx, void * pcsc_context_handle, void * pcsc_c
 	gpriv->attached_reader = NULL;
 
 	gpriv->pcsc_ctx = *(SCARDCONTEXT *)pcsc_context_handle;
-	card_handle =  *(SCARDHANDLE *)pcsc_card_handle;
+	card_handle = *(SCARDHANDLE *)pcsc_card_handle;
 
 	if(SCARD_S_SUCCESS == gpriv->SCardGetAttrib(card_handle,
 				SCARD_ATTR_DEVICE_SYSTEM_NAME_A, (LPBYTE)

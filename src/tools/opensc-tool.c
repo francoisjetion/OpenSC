@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -428,7 +428,7 @@ static int print_file(sc_card_t *in_card, const sc_file_t *file,
 			printf("Record %"SC_FORMAT_LEN_SIZE_T"u\n", rec_nr);
 			r = sc_lock(card);
 			if (r == SC_SUCCESS)
-				r = sc_read_record(in_card, rec_nr, buf, sizeof(buf), SC_RECORD_BY_REC_NR);
+				r = sc_read_record(in_card, rec_nr, 0, buf, sizeof(buf), SC_RECORD_BY_REC_NR);
 			sc_unlock(card);
 			if (r > 0)
 				util_hex_dump_asc(stdout, buf, r, 0);
@@ -811,6 +811,9 @@ int main(int argc, char *argv[])
 	memset(&ctx_param, 0, sizeof(ctx_param));
 	ctx_param.ver      = 0;
 	ctx_param.app_name = app_name;
+	ctx_param.debug    = verbose;
+	if (verbose)
+		ctx_param.debug_file = stderr;
 
 	r = sc_context_create(&ctx, &ctx_param);
 	if (r) {
@@ -843,7 +846,7 @@ int main(int argc, char *argv[])
 	if (action_count <= 0)
 		goto end;
 
-	err = util_connect_reader(ctx, &reader, opt_reader, opt_wait, verbose);
+	err = util_connect_reader(ctx, &reader, opt_reader, opt_wait);
 	if (err) {
 		fprintf(stderr, "Failed to connect to reader: %s\n", sc_strerror(err));
 		err = 1;

@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -157,6 +157,9 @@ main (int argc, char **argv)
 	memset(&ctx_param, 0, sizeof(ctx_param));
 	ctx_param.ver      = 0;
 	ctx_param.app_name = app_name;
+	ctx_param.debug    = cmdline.verbose_given;
+	if (cmdline.verbose_given > 1)
+		ctx_param.debug_file = stderr;
 
 	r = sc_context_create(&ctx, &ctx_param);
 	if (r) {
@@ -164,12 +167,7 @@ main (int argc, char **argv)
 		exit(1);
 	}
 
-	if (cmdline.verbose_given > 1) {
-		ctx->debug = cmdline.verbose_given;
-		sc_ctx_log_to_file(ctx, "stderr");
-	}
-
-	r = util_connect_card_ex(ctx, &card, cmdline.reader_arg, 0, 0, cmdline.verbose_given);
+	r = util_connect_card_ex(ctx, &card, cmdline.reader_arg, 0, 0);
 	if (r)
 		goto err;
 

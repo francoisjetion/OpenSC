@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifndef _OPENSC_CARDS_H
@@ -90,6 +90,8 @@ enum {
 	SC_CARD_TYPE_STARCOS_GENERIC,
 	SC_CARD_TYPE_STARCOS_V3_4,
 	SC_CARD_TYPE_STARCOS_V3_5,
+	SC_CARD_TYPE_STARCOS_V3_4_ESIGN,
+	SC_CARD_TYPE_STARCOS_V3_5_ESIGN,
 
 	/* tcos driver */
 	SC_CARD_TYPE_TCOS_BASE = 8000,
@@ -135,6 +137,7 @@ enum {
 	SC_CARD_TYPE_PIV_II_OBERTHUR_DUAL_CAC,
 	SC_CARD_TYPE_PIV_II_OBERTHUR,
 	SC_CARD_TYPE_PIV_II_PIVKEY,
+	SC_CARD_TYPE_PIV_II_SWISSBIT,
 
 	/* MuscleApplet */
 	SC_CARD_TYPE_MUSCLE_BASE = 15000,
@@ -182,6 +185,7 @@ enum {
 	SC_CARD_TYPE_ITACNS_BASE = 23000,
 	SC_CARD_TYPE_ITACNS_GENERIC,
 	SC_CARD_TYPE_ITACNS_CNS,
+	SC_CARD_TYPE_ITACNS_CNS_IDEMIA_2021,
 	SC_CARD_TYPE_ITACNS_CIE_V2,
 	SC_CARD_TYPE_ITACNS_CIE_V1,
 
@@ -258,17 +262,26 @@ enum {
 
 	/* IDPrime cards */
 	SC_CARD_TYPE_IDPRIME_BASE = 37000,
-	SC_CARD_TYPE_IDPRIME_V1,
-	SC_CARD_TYPE_IDPRIME_V2,
-	SC_CARD_TYPE_IDPRIME_V3,
-	SC_CARD_TYPE_IDPRIME_V4,
+	SC_CARD_TYPE_IDPRIME_3810,
+	SC_CARD_TYPE_IDPRIME_830,
+	SC_CARD_TYPE_IDPRIME_930,
+	SC_CARD_TYPE_IDPRIME_940,
+	SC_CARD_TYPE_IDPRIME_840,
 	SC_CARD_TYPE_IDPRIME_GENERIC,
 
 	/* eDO cards */
 	SC_CARD_TYPE_EDO = 38000,
 
 	/* JCOP4 cards with NQ-Applet */
-	SC_CARD_TYPE_NQ_APPLET = 39000
+	SC_CARD_TYPE_NQ_APPLET = 39000,
+
+	/* Slovak eID cards */
+	SC_CARD_TYPE_SKEID_BASE = 40000,
+	SC_CARD_TYPE_SKEID_V3,
+
+	/* eOI cards */
+	SC_CARD_TYPE_EOI = 41000,
+	SC_CARD_TYPE_EOI_CONTACTLESS
 };
 
 extern sc_card_driver_t *sc_get_default_driver(void);
@@ -313,6 +326,8 @@ extern sc_card_driver_t *sc_get_esteid2018_driver(void);
 extern sc_card_driver_t *sc_get_idprime_driver(void);
 extern sc_card_driver_t *sc_get_edo_driver(void);
 extern sc_card_driver_t *sc_get_nqApplet_driver(void);
+extern sc_card_driver_t *sc_get_skeid_driver(void);
+extern sc_card_driver_t *sc_get_eoi_driver(void);
 
 #ifdef __cplusplus
 }

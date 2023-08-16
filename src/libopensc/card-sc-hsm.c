@@ -18,7 +18,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -35,6 +35,15 @@
 #include "types.h"
 
 #include "card-sc-hsm.h"
+
+#if defined(ENABLE_SM) && defined(ENABLE_OPENPACE)
+#include "sm/sm-eac.h"
+#include <eac/cv_cert.h>
+#include <eac/eac.h>
+#include <eac/ta.h>
+#include <openssl/bio.h>
+#include <openssl/crypto.h>
+#endif
 
 
 /* Static reference to ISO driver */
@@ -145,9 +154,7 @@ static int sc_hsm_select_file_ex(sc_card_t *card,
 
 	if (file_out == NULL) {				// Versions before 0.16 of the SmartCard-HSM do not support P2='0C'
 		rv = sc_hsm_select_file_ex(card, in_path, forceselect, &file);
-		if (file != NULL) {
-			sc_file_free(file);
-		}
+		sc_file_free(file);
 		return rv;
 	}
 
@@ -181,9 +188,7 @@ static int sc_hsm_select_file_ex(sc_card_t *card,
 			LOG_TEST_RET(card->ctx, rv, "Could not select SmartCard-HSM application");
 
 			if (priv) {
-				if (priv->dffcp != NULL) {
-					sc_file_free(priv->dffcp);
-				}
+				sc_file_free(priv->dffcp);
 				// Cache the FCP returned when selecting the applet
 				sc_file_dup(&priv->dffcp, *file_out);
 			}
@@ -478,14 +483,7 @@ static int sc_hsm_soc_biomatch(sc_card_t *card, struct sc_pin_cmd_data *data,
 
 
 
-#ifdef ENABLE_SM
-#ifdef ENABLE_OPENPACE
-#include "sm/sm-eac.h"
-#include <eac/cv_cert.h>
-#include <eac/eac.h>
-#include <eac/ta.h>
-#include <openssl/bio.h>
-#include <openssl/crypto.h>
+#if defined(ENABLE_SM) && defined(ENABLE_OPENPACE)
 
 static int sc_hsm_perform_chip_authentication(sc_card_t *card)
 {
@@ -604,7 +602,6 @@ static int sc_hsm_perform_chip_authentication(sc_card_t *card)
 {
 	return SC_ERROR_NOT_SUPPORTED;
 }
-#endif
 #endif
 
 
@@ -730,12 +727,12 @@ static int sc_hsm_pin_cmd(sc_card_t *card, struct sc_pin_cmd_data *data,
 			u8 recvbuf[SC_MAX_APDU_BUFFER_SIZE];
 #ifdef ENABLE_SM
 			if (card->sm_ctx.sm_mode != SM_MODE_TRANSMIT) {
-				sc_log(card->ctx, 
+				sc_log(card->ctx,
 						"Session PIN generation only supported in SM");
 				LOG_FUNC_RETURN(card->ctx, SC_SUCCESS);
 			}
 #else
-			sc_log(card->ctx, 
+			sc_log(card->ctx,
 					"Session PIN generation only supported in SM");
 			LOG_FUNC_RETURN(card->ctx, SC_SUCCESS);
 #endif
@@ -746,7 +743,7 @@ static int sc_hsm_pin_cmd(sc_card_t *card, struct sc_pin_cmd_data *data,
 			apdu.le = 0;
 			if (sc_transmit_apdu(card, &apdu) != SC_SUCCESS
 					|| sc_check_sw(card, apdu.sw1, apdu.sw2) != SC_SUCCESS) {
-				sc_log(card->ctx, 
+				sc_log(card->ctx,
 						"Generating session PIN failed");
 				LOG_FUNC_RETURN(card->ctx, SC_SUCCESS);
 			}
@@ -756,12 +753,12 @@ static int sc_hsm_pin_cmd(sc_card_t *card, struct sc_pin_cmd_data *data,
 							apdu.resplen);
 					data->pin2.len = apdu.resplen;
 				} else {
-					sc_log(card->ctx, 
+					sc_log(card->ctx,
 							"Buffer too small for session PIN");
 				}
 			}
 		} else {
-			sc_log(card->ctx, 
+			sc_log(card->ctx,
 					"Session PIN not supported for this PIN (0x%02X)",
 					data->pin_reference);
 		}
@@ -786,10 +783,10 @@ static int sc_hsm_logout(sc_card_t * card)
 }
 
 
-
+/* NOTE: idx is an offset into the card's file, not into buf */
 static int sc_hsm_read_binary(sc_card_t *card,
 			       unsigned int idx, u8 *buf, size_t count,
-			       unsigned long flags)
+			       unsigned long *flags)
 {
 	sc_context_t *ctx = card->ctx;
 	sc_apdu_t apdu;
@@ -827,7 +824,7 @@ static int sc_hsm_read_binary(sc_card_t *card,
 }
 
 
-
+/* NOTE: idx is an offset into the card's file, not into buf */
 static int sc_hsm_write_ef(sc_card_t *card,
 			       int fid,
 			       unsigned int idx, const u8 *buf, size_t count)
@@ -848,45 +845,60 @@ static int sc_hsm_write_ef(sc_card_t *card,
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_OUT_OF_MEMORY);
 	}
 
-	p = cmdbuff;
-	*p++ = 0x54;
-	*p++ = 0x02;
-	*p++ = (idx >> 8) & 0xFF;
-	*p++ = idx & 0xFF;
-	*p++ = 0x53;
-	if (count < 128) {
-		*p++ = (u8) count;
-		len = 6;
-	} else if (count < 256) {
-		*p++ = 0x81;
-		*p++ = (u8) count;
-		len = 7;
-	} else {
-		*p++ = 0x82;
-		*p++ = (count >> 8) & 0xFF;
-		*p++ = count & 0xFF;
-		len = 8;
-	}
+	size_t bytes_left = count;
+	// 8 bytes are required for T54(4) and T53(4)
+	size_t blk_size = card->max_send_size - 8;
+	size_t to_send = 0;
+	size_t file_offset = (size_t) idx;
+	size_t offset = 0;
+	do {
+		to_send = bytes_left >= blk_size ? blk_size : bytes_left;
+		p = cmdbuff;
+		// ASN1 0x54 offset
+		*p++ = 0x54;
+		*p++ = 0x02;
+		*p++ = (file_offset >> 8) & 0xFF;
+		*p++ = file_offset & 0xFF;
+		// ASN1 0x53 to_send
+		*p++ = 0x53;
+		if (to_send < 128) {
+			*p++ = (u8)to_send;
+			len = 6;
+		} else if (to_send < 256) {
+			*p++ = 0x81;
+			*p++ = (u8)to_send;
+			len = 7;
+		} else {
+			*p++ = 0x82;
+			*p++ = (to_send >> 8) & 0xFF;
+			*p++ = to_send & 0xFF;
+			len = 8;
+		}
 
-	if (buf != NULL)
-		memcpy(p, buf, count);
-	len += count;
+		if (buf != NULL)
+			memcpy(p, buf+offset, to_send);
+		len += to_send;
 
-	sc_format_apdu(card, &apdu, SC_APDU_CASE_3, 0xD7, fid >> 8, fid & 0xFF);
-	apdu.data = cmdbuff;
-	apdu.datalen = len;
-	apdu.lc = len;
+		sc_format_apdu(card, &apdu, SC_APDU_CASE_3, 0xD7, fid >> 8, fid & 0xFF);
+		apdu.data = cmdbuff;
+		apdu.datalen = len;
+		apdu.lc = len;
 
-	r = sc_transmit_apdu(card, &apdu);
+		r = sc_transmit_apdu(card, &apdu);
+		LOG_TEST_GOTO_ERR(ctx, r, "APDU transmit failed");
+		r = sc_check_sw(card, apdu.sw1, apdu.sw2);
+		LOG_TEST_GOTO_ERR(ctx, r, "Check SW error");
+
+		bytes_left -= to_send;
+		offset += to_send;
+		file_offset += to_send;
+	} while (0 < bytes_left);
+
+err:
 	free(cmdbuff);
-	LOG_TEST_RET(ctx, r, "APDU transmit failed");
-
-	r =  sc_check_sw(card, apdu.sw1, apdu.sw2);
-	LOG_TEST_RET(ctx, r, "Check SW error");
 
 	LOG_FUNC_RETURN(ctx, count);
 }
-
 
 
 static int sc_hsm_update_binary(sc_card_t *card,
@@ -995,6 +1007,10 @@ static int sc_hsm_set_security_env(sc_card_t *card,
 				priv->algorithm = ALGO_RSA_PKCS1;
 			}
 		} else if (env->algorithm_flags & SC_ALGORITHM_RSA_PAD_PSS) {
+			if ((env->algorithm_flags & SC_ALGORITHM_RSA_HASHES) &&
+					(((env->algorithm_flags & SC_ALGORITHM_MGF1_HASHES) >> 8) != (env->algorithm_flags & SC_ALGORITHM_RSA_HASHES))) {
+				LOG_FUNC_RETURN(card->ctx, SC_ERROR_INVALID_ARGUMENTS);
+			}
 			priv->algorithm = ALGO_RSA_PSS;
 		} else {
 			if (env->operation == SC_SEC_OPERATION_DECIPHER) {
@@ -1034,10 +1050,8 @@ static int sc_hsm_decode_ecdsa_signature(sc_card_t *card,
 					const u8 * data, size_t datalen,
 					u8 * out, size_t outlen) {
 
-	int i, r;
+	int r;
 	size_t fieldsizebytes;
-	const u8 *body, *tag;
-	size_t bodylen, taglen;
 
 	// Determine field size from length of signature
 	if (datalen <= 58) {			// 192 bit curve = 24 * 2 + 10 byte maximum DER signature
@@ -1060,41 +1074,7 @@ static int sc_hsm_decode_ecdsa_signature(sc_card_t *card,
 	       "Field size %"SC_FORMAT_LEN_SIZE_T"u, signature buffer size %"SC_FORMAT_LEN_SIZE_T"u",
 	       fieldsizebytes, outlen);
 
-	if (outlen < (fieldsizebytes * 2)) {
-		LOG_TEST_RET(card->ctx, SC_ERROR_INVALID_DATA, "output too small for EC signature");
-	}
-	memset(out, 0, outlen);
-
-	// Copied from card-piv.c. Thanks
-	body = sc_asn1_find_tag(card->ctx, data, datalen, 0x30, &bodylen);
-
-	for (i = 0; i<2; i++) {
-		if (body) {
-			tag = sc_asn1_find_tag(card->ctx, body,  bodylen, 0x02, &taglen);
-			if (tag) {
-				bodylen -= taglen - (tag - body);
-				body = tag + taglen;
-
-				if (taglen > fieldsizebytes) { /* drop leading 00 if present */
-					if (*tag != 0x00) {
-						r = SC_ERROR_INVALID_DATA;
-						goto err;
-					}
-					tag++;
-					taglen--;
-				}
-				memcpy(out + fieldsizebytes*i + fieldsizebytes - taglen , tag, taglen);
-			} else {
-				r = SC_ERROR_INVALID_DATA;
-				goto err;
-			}
-		} else  {
-			r = SC_ERROR_INVALID_DATA;
-			goto err;
-		}
-	}
-	r = 2 * fieldsizebytes;
-err:
+	r = sc_asn1_decode_ecdsa_signature(card->ctx, data, datalen, fieldsizebytes, &out, outlen);
 	LOG_FUNC_RETURN(card->ctx, r);
 }
 
@@ -1216,6 +1196,16 @@ static int sc_hsm_get_serialnr(sc_card_t *card, sc_serial_number_t *serial)
 
 	LOG_FUNC_CALLED(card->ctx);
 
+	if (!priv->serialno && 0 == strcmp(card->ctx->app_name, "opensc-tool")) {
+		/* sc-hsm initializes the serial number via its PKCS#15 layer.
+		 * Create and destroy a dummy card to get this initialized.  Only do
+		 * this for `opensc-tool --serial` to avoid unnecessary card commands
+		 * in all other cases. */
+		sc_pkcs15_card_t *p15card = NULL;
+		(void)sc_pkcs15_bind(card, NULL, &p15card);
+		sc_pkcs15_unbind(p15card);
+	}
+
 	if (!priv->serialno) {
 		return SC_ERROR_OBJECT_NOT_FOUND;
 	}
@@ -1253,7 +1243,7 @@ static int sc_hsm_initialize(sc_card_t *card, sc_cardctl_sc_hsm_init_param_t *pa
 		return SC_ERROR_INVALID_ARGUMENTS;
 	}
 	*p++ = 0x81;	// User PIN
-	*p++ = (u8) params->user_pin_len;
+	*p++ = (u8)params->user_pin_len;
 	memcpy(p, params->user_pin, params->user_pin_len);
 	p += params->user_pin_len;
 
@@ -1426,12 +1416,11 @@ static int sc_hsm_unwrap_key(sc_card_t *card, sc_cardctl_sc_hsm_wrapped_key_t *p
 
 	LOG_FUNC_CALLED(card->ctx);
 
-	sc_format_apdu(card, &apdu, SC_APDU_CASE_3_EXT, 0x74, params->key_id, 0x93);
-	apdu.cla = 0x80;
-	apdu.lc = params->wrapped_key_length;
-	apdu.data = params->wrapped_key;
-	apdu.datalen = params->wrapped_key_length;
+	r = sc_hsm_write_ef(card, 0x2F10, 0, params->wrapped_key, params->wrapped_key_length);
+	LOG_TEST_RET(card->ctx, r, "Create EF failed");
 
+	sc_format_apdu(card, &apdu, SC_APDU_CASE_1, 0x74, params->key_id, 0x93);
+	apdu.cla = 0x80;
 	r = sc_transmit_apdu(card, &apdu);
 	LOG_TEST_RET(ctx, r, "APDU transmit failed");
 
@@ -1784,25 +1773,20 @@ static int sc_hsm_card_ctl(sc_card_t *card, unsigned long cmd, void *ptr)
 
 static int sc_hsm_init(struct sc_card *card)
 {
-#if defined(ENABLE_OPENPACE) && defined(_WIN32)
+#if defined(ENABLE_SM) && defined(ENABLE_OPENPACE) && defined(_WIN32)
 	char expanded_val[PATH_MAX];
 	size_t expanded_len = PATH_MAX;
 #endif
 	int flags,ext_flags;
 	sc_file_t *file = NULL;
 	sc_path_t path;
-	sc_hsm_private_data_t *priv = card->drv_data;
+	sc_hsm_private_data_t *priv = NULL;
 
 	LOG_FUNC_CALLED(card->ctx);
 
-	if (!priv) {
-		priv = calloc(1, sizeof(sc_hsm_private_data_t));
-		if (!priv)
-			LOG_FUNC_RETURN(card->ctx, SC_ERROR_OUT_OF_MEMORY);
-		card->drv_data = priv;
-	}
-
-	flags = SC_ALGORITHM_RSA_RAW|SC_ALGORITHM_RSA_PAD_PSS|SC_ALGORITHM_ONBOARD_KEY_GEN;
+	flags = SC_ALGORITHM_RSA_RAW|SC_ALGORITHM_RSA_PAD_PSS|SC_ALGORITHM_ONBOARD_KEY_GEN
+			|SC_ALGORITHM_RSA_HASH_SHA256|SC_ALGORITHM_RSA_HASH_SHA384|SC_ALGORITHM_RSA_HASH_SHA512
+			|SC_ALGORITHM_MGF1_SHA256|SC_ALGORITHM_MGF1_SHA384|SC_ALGORITHM_MGF1_SHA512;
 
 	_sc_card_add_rsa_alg(card, 1024, flags, 0);
 	_sc_card_add_rsa_alg(card, 1536, flags, 0);
@@ -1832,6 +1816,46 @@ static int sc_hsm_init(struct sc_card *card)
 	_sc_card_add_ec_alg(card, 521, flags, ext_flags, NULL);
 
 	card->caps |= SC_CARD_CAP_RNG|SC_CARD_CAP_APDU_EXT|SC_CARD_CAP_ISO7816_PIN_INFO;
+
+	// APDU Buffer limits
+	//   JCOP 2.4.1r3           1462
+	//   JCOP 2.4.2r3           1454
+	//   JCOP 3                 1232
+	//   MicroSD with JCOP 3    478 / 506 - handled in reader-pcsc.c
+	//   Reiner SCT             1014 - handled in reader-pcsc.c
+
+	// Use JCOP 3 card limits for sending
+	card->max_send_size = 1232;
+	// Assume that card supports sending with extended length APDU and without limit
+	card->max_recv_size = 0;
+
+	if (card->type == SC_CARD_TYPE_SC_HSM_SOC
+			|| card->type == SC_CARD_TYPE_SC_HSM_GOID) {
+		card->max_recv_size = 0x0630;	// SoC Proxy forces this limit
+	} else {
+		// Adjust to the limits set by the reader
+		if (card->reader->max_send_size < card->max_send_size) {
+			if (18 >= card->reader->max_send_size)
+				LOG_FUNC_RETURN(card->ctx, SC_ERROR_INCONSISTENT_CONFIGURATION);
+
+			// 17 byte header and TLV because of odd ins in UPDATE BINARY
+			card->max_send_size = card->reader->max_send_size - 17;
+		}
+
+		if (0 < card->reader->max_recv_size) {
+			if (3 >= card->reader->max_recv_size)
+				LOG_FUNC_RETURN(card->ctx, SC_ERROR_INCONSISTENT_CONFIGURATION);
+			card->max_recv_size = card->reader->max_recv_size - 2;
+		}
+	}
+
+	priv = card->drv_data;
+	if (!priv) {
+		priv = calloc(1, sizeof(sc_hsm_private_data_t));
+		if (!priv)
+			LOG_FUNC_RETURN(card->ctx, SC_ERROR_OUT_OF_MEMORY);
+		card->drv_data = priv;
+	}
 
 	sc_path_set(&path, SC_PATH_TYPE_DF_NAME, sc_hsm_aid.value, sc_hsm_aid.len, 0, 0);
 	if (sc_hsm_select_file_ex(card, &path, 0, &file) == SC_SUCCESS
@@ -1865,29 +1889,10 @@ static int sc_hsm_init(struct sc_card *card)
 	}
 	sc_file_free(file);
 
-	// APDU Buffer limits
-	//   JCOP 2.4.1r3           1462
-	//   JCOP 2.4.2r3           1454
-	//   JCOP 3                 1232
-	//   MicroSD with JCOP 3    478 / 506
-	//   Reiner SCT             1014
-
-	card->max_send_size = 1232 - 17;	// 1232 buffer size - 17 byte header and TLV because of odd ins in UPDATE BINARY
-
-	if (!strncmp("Secure Flash Card", card->reader->name, 17)) {
-		card->max_send_size = 478 - 17;
-		card->max_recv_size = 506 - 2;
-	} else if (card->type == SC_CARD_TYPE_SC_HSM_SOC
-			|| card->type == SC_CARD_TYPE_SC_HSM_GOID) {
-		card->max_recv_size = 0x0630;	// SoC Proxy forces this limit
-	} else {
-		card->max_recv_size = 0;		// Card supports sending with extended length APDU and without limit
-	}
-
 	priv->EF_C_DevAut = NULL;
 	priv->EF_C_DevAut_len = 0;
 
-#ifdef ENABLE_OPENPACE
+#if defined(ENABLE_SM) && defined(ENABLE_OPENPACE)
 	EAC_init();
 #ifdef _WIN32
 	expanded_len = ExpandEnvironmentStringsA(CVCDIR, expanded_val, sizeof expanded_val);
@@ -1909,13 +1914,11 @@ static int sc_hsm_finish(sc_card_t * card)
 #ifdef ENABLE_SM
 	sc_sm_stop(card);
 #endif
-	if (priv->serialno) {
+	if (priv) {
 		free(priv->serialno);
-	}
-	if (priv->dffcp) {
 		sc_file_free(priv->dffcp);
+		free(priv->EF_C_DevAut);
 	}
-	free(priv->EF_C_DevAut);
 	free(priv);
 
 	return SC_SUCCESS;

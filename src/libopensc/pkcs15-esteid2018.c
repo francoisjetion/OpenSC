@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -87,7 +87,7 @@ static int sc_pkcs15emu_esteid2018_init(sc_pkcs15_card_t *p15card) {
 			continue;
 
 		sc_pkcs15_cert_t *cert = NULL;
-		r = sc_pkcs15_read_certificate(p15card, &cert_info, &cert);
+		r = sc_pkcs15_read_certificate(p15card, &cert_info, 0, &cert);
 		LOG_TEST_GOTO_ERR(card->ctx, r, "Could not read authentication certificate");
 
 		if (cert->key->algorithm == SC_ALGORITHM_EC)

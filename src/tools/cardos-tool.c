@@ -18,7 +18,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -198,6 +198,8 @@ static int cardos_info(void)
 	} else if (apdu.resp[0] == 0xc9 &&
 			(apdu.resp[1] == 0x02 || apdu.resp[1] == 0x03)) {
 		printf(" (that's CardOS V5.3)\n");
+	} else if (apdu.resp[0] == 0xc9 && apdu.resp[1] == 0x04) {
+		printf(" (that's CardOS V5.4)\n");
 	} else {
 		printf(" (unknown Version)\n");
 	}
@@ -1182,11 +1184,18 @@ int main(int argc, char *argv[])
 			util_print_usage_and_die(app_name, options, option_help, NULL);
 		}
 	}
+	
+	if (action_count == 0)
+		util_print_usage_and_die(app_name, options, option_help, NULL);
 
 	/* create sc_context_t object */
 	memset(&ctx_param, 0, sizeof(ctx_param));
 	ctx_param.ver      = 0;
 	ctx_param.app_name = app_name;
+	ctx_param.debug    = verbose;
+	if (verbose)
+		ctx_param.debug_file = stderr;
+
 	r = sc_context_create(&ctx, &ctx_param);
 	if (r) {
 		fprintf(stderr, "Failed to establish context: %s\n",
@@ -1202,7 +1211,7 @@ int main(int argc, char *argv[])
 		goto end;
 	}
 
-	err = util_connect_card(ctx, &card, opt_reader, opt_wait, verbose);
+	err = util_connect_card(ctx, &card, opt_reader, opt_wait);
 	if (err)
 		goto end;
 

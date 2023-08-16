@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -476,6 +476,9 @@ int main(int argc, char *argv[])
 	memset(&ctx_param, 0, sizeof(ctx_param));
 	ctx_param.ver      = 0;
 	ctx_param.app_name = app_name;
+	ctx_param.debug    = verbose;
+	if (verbose)
+		ctx_param.debug_file = stderr;
 
 	r = sc_context_create(&ctx, &ctx_param);
 	if (r) {
@@ -483,7 +486,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	err = util_connect_card_ex(ctx, &card, opt_reader, opt_wait, 0, verbose);
+	err = util_connect_card_ex(ctx, &card, opt_reader, opt_wait, 0);
 	if (err)
 		goto end;
 

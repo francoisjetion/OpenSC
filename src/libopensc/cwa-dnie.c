@@ -19,7 +19,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #define __SM_DNIE_C__
@@ -695,8 +695,8 @@ static int dnie_get_root_ca_pubkey(sc_card_t * card, EVP_PKEY ** root_ca_key)
 	EVP_PKEY_CTX *ctx = NULL;
 	OSSL_PARAM_BLD *bld = NULL;
 	OSSL_PARAM *params = NULL;
-	
-	ctx = EVP_PKEY_CTX_new_from_name(NULL, "RSA", NULL);
+
+	ctx = EVP_PKEY_CTX_new_from_name(card->ctx->ossl3ctx->libctx, "RSA", NULL);
 	if (!ctx) {
 #endif
 		sc_log(card->ctx, "Cannot create data for root CA public key");
@@ -895,7 +895,7 @@ static int dnie_get_privkey(sc_card_t * card, EVP_PKEY ** ifd_privkey,
 	EVP_PKEY_CTX *ctx = NULL;
 
 	LOG_FUNC_CALLED(card->ctx);
-	ctx = EVP_PKEY_CTX_new_from_name(NULL, "RSA", NULL);
+	ctx = EVP_PKEY_CTX_new_from_name(card->ctx->ossl3ctx->libctx, "RSA", NULL);
 
 	if (!ctx) { 
 #endif

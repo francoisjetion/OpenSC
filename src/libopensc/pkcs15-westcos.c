@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -131,7 +131,7 @@ static int sc_pkcs15emu_westcos_init(sc_pkcs15_card_t * p15card)
 		cert_info.id.value[0] = 0x45;
 		cert_info.authority = 0;
 		cert_info.path = path;
-		r = sc_pkcs15_read_certificate(p15card, &cert_info, &cert);
+		r = sc_pkcs15_read_certificate(p15card, &cert_info, 0, &cert);
 		cert_obj.data = (void *) cert;
 		if (!r) {
 			strlcpy(cert_obj.label, "User certificate",

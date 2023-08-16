@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #ifndef MUSCLE_FILESYSTEM_H
@@ -34,6 +34,7 @@ typedef struct mscfs_file {
 	size_t size;
 	unsigned short read, write, delete;
 	int ef;
+	int deleteFile;
 } mscfs_file_t;
 
 typedef struct mscfs_cache {
@@ -57,7 +58,7 @@ void mscfs_clear_cache(mscfs_t* fs);
 int mscfs_push_file(mscfs_t* fs, mscfs_file_t *file);
 int mscfs_update_cache(mscfs_t* fs);
 
-void mscfs_check_cache(mscfs_t* fs);
+int mscfs_check_cache(mscfs_t* fs);
 
 int mscfs_lookup_path(mscfs_t* fs, const u8 *path, int pathlen, msc_id* objectId, int isDirectory);
 

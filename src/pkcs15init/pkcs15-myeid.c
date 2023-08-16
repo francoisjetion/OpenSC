@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -417,6 +417,11 @@ myeid_new_file(sc_profile_t *profile, sc_card_t *card,
 	file->id += num;
 	p = &file->path;
 	*p = profile->df_info->file->path;
+	if (p->len >= SC_MAX_PATH_SIZE - 2) {
+		sc_log(card->ctx, "Wrong path length");
+		sc_file_free(file);
+		return SC_ERROR_INTERNAL;
+	}
 	p->value[p->len++] = (u8) (file->id / 256);
 	p->value[p->len++] = (u8) (file->id % 256);
 
@@ -598,8 +603,10 @@ myeid_create_key(struct sc_profile *profile, struct sc_pkcs15_card *p15card,
 	r = myeid_new_file(profile, card, object->type, *key_reference, &file);
 	LOG_TEST_RET(ctx, r, "Cannot get new MyEID key file");
 
-	if (!file || !file->path.len)
+	if (!file || !file->path.len || file->path.len > SC_MAX_PATH_SIZE) {
+		sc_file_free(file);
 		LOG_TEST_RET(ctx, SC_ERROR_INVALID_ARGUMENTS, "Cannot determine key file");
+	}
 
 	sc_log(ctx, "Key file size %d", keybits);
 	file->size = keybits;

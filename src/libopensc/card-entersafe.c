@@ -11,7 +11,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 /* Initially written by Weitao Sun (weitao@ftsafe.com) 2008 */
@@ -199,6 +199,8 @@ static int entersafe_cipher_apdu(sc_card_t *card, sc_apdu_t *apdu,
 								 u8 *buff, size_t buffsize)
 {
 	 EVP_CIPHER_CTX * ctx = NULL;
+	EVP_CIPHER *alg = NULL;
+
 	 u8 iv[8]={0};
 	 int len;
 
@@ -220,20 +222,27 @@ static int entersafe_cipher_apdu(sc_card_t *card, sc_apdu_t *apdu,
 		 LOG_FUNC_RETURN(card->ctx, SC_ERROR_OUT_OF_MEMORY);
 	 EVP_CIPHER_CTX_set_padding(ctx,0);
 
-	 if(keylen == 8)
-		  EVP_EncryptInit_ex(ctx, EVP_des_ecb(), NULL, key, iv);
-	 else if (keylen == 16) 
-		  EVP_EncryptInit_ex(ctx, EVP_des_ede(), NULL, key, iv);
-	 else
+	if (keylen == 8) {
+	 	alg = sc_evp_cipher(card->ctx, "DES-ECB");
+		EVP_EncryptInit_ex(ctx, alg, NULL, key, iv);
+	} else if (keylen == 16) {
+	 	alg = sc_evp_cipher(card->ctx, "DES-EDE");
+		EVP_EncryptInit_ex(ctx, alg, NULL, key, iv);
+	} else {
+		EVP_CIPHER_CTX_free(ctx);
 		  LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
-	 
+	}
+
 	 len = apdu->lc;
 	 if(!EVP_EncryptUpdate(ctx, buff, &len, buff, buffsize)){
+		sc_evp_cipher_free(alg);
+		EVP_CIPHER_CTX_free(ctx);
 		  sc_log(card->ctx,  "entersafe encryption error.");
 		  LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
 	 }
 	 apdu->lc = len;
 
+	sc_evp_cipher_free(alg);
 	 EVP_CIPHER_CTX_free(ctx);
 
 	 if(apdu->lc!=buffsize)
@@ -258,6 +267,7 @@ static int entersafe_mac_apdu(sc_card_t *card, sc_apdu_t *apdu,
 	 size_t tmpsize=0,tmpsize_rounded=0;
 	 int outl=0;
 	 EVP_CIPHER_CTX * ctx = NULL;
+	EVP_CIPHER *alg = NULL;
 
 	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
 
@@ -301,7 +311,8 @@ static int entersafe_mac_apdu(sc_card_t *card, sc_apdu_t *apdu,
 		goto out;
 	 }
 	 EVP_CIPHER_CTX_set_padding(ctx,0);
-	 EVP_EncryptInit_ex(ctx, EVP_des_cbc(), NULL, key, iv);
+	alg = sc_evp_cipher(card->ctx, "DES-CBC");
+	EVP_EncryptInit_ex(ctx, alg, NULL, key, iv);
 
 	 if(tmpsize_rounded>8){
 		  if(!EVP_EncryptUpdate(ctx,tmp_rounded,&outl,tmp_rounded,tmpsize_rounded-8)){
@@ -338,8 +349,10 @@ out:
 		  free(tmp);
 	 if(tmp_rounded)
 		  free(tmp_rounded);
-	 if  (ctx)
+	 if (ctx) {
+		sc_evp_cipher_free(alg);
 		EVP_CIPHER_CTX_free(ctx);
+	}
 
 	 SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, r);
 }
@@ -410,7 +423,7 @@ out:
 
 static int entersafe_read_binary(sc_card_t *card,
 								 unsigned int idx, u8 *buf, size_t count,
-								 unsigned long flags)
+								 unsigned long *flags)
 {
 	sc_apdu_t apdu;
 	u8 recvbuf[SC_MAX_APDU_BUFFER_SIZE];
@@ -1410,12 +1423,18 @@ static int entersafe_gen_key(sc_card_t *card, sc_entersafe_gen_key_data *data)
 		SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, SC_ERROR_OUT_OF_MEMORY);
 
 	p=rbuf;
-	if (*p!='E')
+	if (*p!='E') {
+		free(data->modulus);
+		data->modulus = NULL;
 		SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, SC_ERROR_INVALID_DATA);
+	}
 	p+=2+p[1];
 	/* N */
-	if (*p!='N')
+	if (*p!='N') {
+		free(data->modulus);
+		data->modulus = NULL;
 		SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, SC_ERROR_INVALID_DATA);
+	}
 	++p;
 	if(*p++>0x80)
 	{

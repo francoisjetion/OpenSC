@@ -21,7 +21,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -721,6 +721,7 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 		struct sc_pkcs15_object    cert_obj;
 		sc_pkcs15_der_t   cert_der;
 		sc_pkcs15_cert_t *cert_out = NULL;
+		int private_obj;
 		
 		ckis[i].cert_found = 0;
 		ckis[i].key_alg = -1;
@@ -750,7 +751,8 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 			continue;
 		}
 
-		r = sc_pkcs15_read_file(p15card, &cert_info.path, &cert_der.value, &cert_der.len);
+		private_obj = cert_obj.flags & SC_PKCS15_CO_FLAG_PRIVATE;
+		r = sc_pkcs15_read_file(p15card, &cert_info.path, &cert_der.value, &cert_der.len, private_obj);
 
 		if (r) {
 			sc_log(card->ctx,  "No cert found,i=%d", i);
@@ -763,12 +765,13 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 		if (cert_der.value) {
 			cert_info.value.value = cert_der.value;
 			cert_info.value.len = cert_der.len;
-			if (!p15card->opts.use_file_cache) {
+			if (!p15card->opts.use_file_cache
+			    || (private_obj && !(p15card->opts.use_file_cache & SC_PKCS15_OPTS_CACHE_ALL_FILES))) {
 				cert_info.path.len = 0; /* use in mem cert from now on */
 			}
 		}
 		/* following will find the cached cert in cert_info */
-		r =  sc_pkcs15_read_certificate(p15card, &cert_info, &cert_out);
+		r =  sc_pkcs15_read_certificate(p15card, &cert_info, private_obj, &cert_out);
 		if (r < 0 || cert_out == NULL || cert_out->key == NULL) {
 			sc_log(card->ctx,  "Failed to read/parse the certificate r=%d",r);
 			if (cert_out != NULL)
@@ -955,8 +958,8 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 		pin_info.attrs.pin.stored_length = pins[i].storedlen;
 		pin_info.attrs.pin.max_length    = pins[i].maxlen;
 		pin_info.attrs.pin.pad_char      = pins[i].pad_char;
+		pin_info.tries_left              = pins[i].tries_left;
 		sc_format_path(pins[i].path, &pin_info.path);
-		pin_info.tries_left    = -1;
 
 		label = pins[i].label;
 		if (i == 0 &&
@@ -967,7 +970,6 @@ static int sc_pkcs15emu_piv_init(sc_pkcs15_card_t *p15card)
 			pin_info.attrs.pin.flags &= ~SC_PKCS15_PIN_FLAG_LOCAL;
 			label = "Global PIN";
 		}
-sc_log(card->ctx,  "DEE Adding pin %d label=%s",i, label);
 		strncpy(pin_obj.label, label, SC_PKCS15_MAX_LABEL_SIZE - 1);
 		pin_obj.flags = pins[i].obj_flags;
 		if (i == 0 && pin_info.attrs.pin.reference == 0x80) {

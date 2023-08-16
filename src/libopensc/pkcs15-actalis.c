@@ -19,7 +19,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -168,7 +168,7 @@ static int sc_pkcs15emu_actalis_init(sc_pkcs15_card_t * p15card)
 	const char *authPRKEY = "Authentication Key";
 	/* const char *nonrepPRKEY = "Non repudiation Key"; */
 
-	p15card->opts.use_file_cache = 1;	
+	p15card->opts.use_file_cache = SC_PKCS15_OPTS_CACHE_ALL_FILES;	
 
 	/* Get Serial number */
 	sc_format_path("3F0030000001", &path);

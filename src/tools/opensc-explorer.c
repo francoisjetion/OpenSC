@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -803,7 +803,7 @@ static int read_and_print_record_file(sc_file_t *file, unsigned char sfi, unsign
 	for (rec = (wanted > 0) ? wanted : 1; wanted == 0 || wanted == rec; rec++) {
 		r = sc_lock(card);
 		if (r == SC_SUCCESS)
-			r = sc_read_record(card, rec, buf, sizeof(buf),
+			r = sc_read_record(card, rec, 0, buf, sizeof(buf),
 					SC_RECORD_BY_REC_NR | sfi);
 		else
 			r = SC_ERROR_READER_LOCKED;
@@ -1582,7 +1582,7 @@ static int do_get_record(int argc, char **argv)
 		goto err;
 	}
 
-	r = sc_read_record(card, rec, buf, sizeof(buf), SC_RECORD_BY_REC_NR);
+	r = sc_read_record(card, rec, 0, buf, sizeof(buf), SC_RECORD_BY_REC_NR);
 	if (r < 0)   {
 		fprintf(stderr, "Cannot read record %"SC_FORMAT_LEN_SIZE_T"u; return %i\n", rec, r);
 		goto err;
@@ -1710,7 +1710,7 @@ static int do_update_record(int argc, char **argv)
 		goto err;
 	}
 
-	r = sc_read_record(card, rec, buf, sizeof(buf), SC_RECORD_BY_REC_NR);
+	r = sc_read_record(card, rec, 0, buf, sizeof(buf), SC_RECORD_BY_REC_NR);
 	if (r < 0) {
 		fprintf(stderr, "Cannot read record %"SC_FORMAT_LEN_SIZE_T"u of %04X: %s\n",
 			rec, file->id, sc_strerror(r));
@@ -1732,7 +1732,7 @@ static int do_update_record(int argc, char **argv)
 
 	r = sc_lock(card);
 	if (r == SC_SUCCESS)
-		r = sc_update_record(card, rec, buf, buflen, SC_RECORD_BY_REC_NR);
+		r = sc_update_record(card, rec, 0, buf, buflen, SC_RECORD_BY_REC_NR);
 	sc_unlock(card);
 	if (r < 0) {
 		fprintf(stderr, "Cannot update record %"SC_FORMAT_LEN_SIZE_T"u of %04X: %s\n.",
@@ -1858,7 +1858,7 @@ static int do_erase(int argc, char **argv)
 
 static int do_random(int argc, char **argv)
 {
-	unsigned char buffer[SC_MAX_EXT_APDU_BUFFER_SIZE];
+	unsigned char buffer[SC_MAX_EXT_APDU_BUFFER_SIZE] = {0};
 	int r, count;
 	const char *filename = NULL;
 	FILE *outf = NULL;
@@ -2092,7 +2092,7 @@ static int do_asn1(int argc, char **argv)
 	sc_path_t path;
 	sc_file_t *file = NULL;
 	int not_current = 1;
-	u8 buf[SC_MAX_EXT_APDU_DATA_SIZE];
+	u8 buf[SC_MAX_EXT_APDU_DATA_SIZE] = {0};
 
 	if (argc > 3)
 		return usage(do_asn1);
@@ -2138,6 +2138,8 @@ static int do_asn1(int argc, char **argv)
 		r = sc_lock(card);
 		if (r == SC_SUCCESS)
 			r = sc_read_binary(card, 0, buf, MIN(size, sizeof(buf)), 0);
+		else
+			r = SC_ERROR_READER_LOCKED;
 		sc_unlock(card);
 		if (r < 0) {
 			check_ret(r, SC_AC_OP_READ, "read failed", file);
@@ -2174,7 +2176,7 @@ static int do_asn1(int argc, char **argv)
 
 		r = sc_lock(card);
 		if (r == SC_SUCCESS)
-			r = sc_read_record(card, rec, buf, sizeof(buf), SC_RECORD_BY_REC_NR);
+			r = sc_read_record(card, rec, 0, buf, sizeof(buf), SC_RECORD_BY_REC_NR);
 		else
 			r = SC_ERROR_READER_LOCKED;
 		sc_unlock(card);
@@ -2382,6 +2384,9 @@ int main(int argc, char *argv[])
 	memset(&ctx_param, 0, sizeof(ctx_param));
 	ctx_param.ver      = 0;
 	ctx_param.app_name = app_name;
+	ctx_param.debug    = verbose;
+	if (verbose)
+		ctx_param.debug_file = stderr;
 
 	r = sc_context_create(&ctx, &ctx_param);
 	if (r) {
@@ -2411,7 +2416,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	err = util_connect_card_ex(ctx, &card, opt_reader, opt_wait, 0, 0);
+	err = util_connect_card_ex(ctx, &card, opt_reader, opt_wait, 0);
 	if (err)
 		goto end;
 

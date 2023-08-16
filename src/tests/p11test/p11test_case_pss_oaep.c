@@ -395,7 +395,7 @@ int oaep_encrypt_decrypt_test(test_cert_t *o, token_info_t *info, test_mech_t *m
 		return 0;
 	}
 
-	if (o->type != EVP_PK_RSA) {
+	if (o->type != EVP_PKEY_RSA) {
 		debug_print(" [ KEY %s ] Skip non-RSA key for encryption", o->id_str);
 		return 0;
 	}
@@ -534,6 +534,7 @@ int pss_sign_message(test_cert_t *o, token_info_t *info, CK_BYTE *message,
 
 	if (rv != CKR_OK) {
 		free(*sign);
+		*sign = NULL;
 		fprintf(stderr, "  C_Sign: rv = 0x%.8lX\n", rv);
 		return -1;
 	}
@@ -583,8 +584,8 @@ int pss_verify_message_openssl(test_cert_t *o, token_info_t *info,
 			o->id_str, ERR_error_string(ERR_peek_last_error(), NULL));
 		goto out;
 	}
-	free(free_message);
 out:
+	free(free_message);
 	EVP_PKEY_CTX_free(pctx);
 	return rv;
 }
@@ -654,7 +655,7 @@ int pss_sign_verify_test(test_cert_t *o, token_info_t *info, test_mech_t *mech)
 		return 0;
 	}
 
-	if (o->type != EVP_PK_RSA) {
+	if (o->type != EVP_PKEY_RSA) {
 		debug_print(" [SKIP %s ] Skip non-RSA key", o->id_str);
 		return 0;
 	}
@@ -709,7 +710,7 @@ void fill_object_pss_mechanisms(token_info_t *info, test_cert_t *o)
 		test_mech_t *source_mech = &token.rsa_mechs[j];
 
 		/* skip non-RSA-PSS mechs early */
-		if (!is_pss_mechanism(source_mech->mech) && 
+		if (!is_pss_mechanism(source_mech->mech) &&
 			source_mech->mech != CKM_RSA_PKCS_OAEP) {
 			continue;
 		}
@@ -827,7 +828,7 @@ void pss_oaep_test(void **state) {
 			continue;
 
 		/* Do not list non-RSA keys here */
-		if (o->type != EVP_PK_RSA)
+		if (o->type != EVP_PKEY_RSA)
 			continue;
 
 		printf("\n[%-6s] [%s]\n",

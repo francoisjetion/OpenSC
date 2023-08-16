@@ -15,13 +15,12 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
 
-#ifdef ENABLE_OPENPACE
 #include "fread_to_eof.h"
 #include "npa-tool-cmdline.h"
 #include "sm/sm-eac.h"
@@ -371,8 +370,6 @@ main (int argc, char **argv)
 	}
 	if (cmdline.tr_03110v201_flag)
 		tr_version = EAC_TR_VERSION_2_01;
-	if (cmdline.disable_all_checks_flag)
-		eac_default_flags |= EAC_FLAG_DISABLE_CHECK_ALL;
 	if (cmdline.disable_ta_checks_flag)
 		eac_default_flags |= EAC_FLAG_DISABLE_CHECK_TA;
 	if (cmdline.disable_ca_checks_flag)
@@ -382,6 +379,9 @@ main (int argc, char **argv)
 	memset(&ctx_param, 0, sizeof(ctx_param));
 	ctx_param.ver      = 0;
 	ctx_param.app_name = app_name;
+	ctx_param.debug    = cmdline.verbose_given;
+	if (cmdline.verbose_given)
+		ctx_param.debug_file = stderr;
 
 	r = sc_context_create(&ctx, &ctx_param);
 	if (r) {
@@ -393,7 +393,7 @@ main (int argc, char **argv)
 	if (r)
 		goto err;
 
-	r = util_connect_card_ex(ctx, &card, cmdline.reader_arg, 0, 0, cmdline.verbose_given);
+	r = util_connect_card_ex(ctx, &card, cmdline.reader_arg, 0, 0);
 	if (r)
 		goto err;
 
@@ -863,14 +863,4 @@ err:
 
 	return -r;
 }
-#else
 
-#include <stdio.h>
-
-int
-main (int argc, char **argv)
-{
-	fprintf(stderr, "OpenPACE is needed for npa-tool\n");
-	return 1;
-}
-#endif

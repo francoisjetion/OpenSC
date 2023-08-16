@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  *
  * Random notes
  *  -	the "key" command should go away, it's obsolete
@@ -53,6 +53,8 @@
 #define DEF_PUBKEY_ACCESS	0x12
 
 #define TEMPLATE_FILEID_MIN_DIFF	0x20
+
+#define WORD_SIZE	64
 
 /*
 #define DEBUG_PROFILE
@@ -259,7 +261,7 @@ static struct auth_info *	new_key(struct sc_profile *,
 				unsigned int, unsigned int);
 static void		set_pin_defaults(struct sc_profile *,
 				struct pin_info *);
-static void		new_macro(sc_profile_t *, const char *, scconf_list *);
+static int		new_macro(sc_profile_t *, const char *, scconf_list *);
 static sc_macro_t *	find_macro(sc_profile_t *, const char *);
 
 static sc_file_t *
@@ -835,6 +837,7 @@ init_state(struct state *cur_state, struct state *new_state)
 static int
 do_card_driver(struct state *cur, int argc, char **argv)
 {
+	free(cur->profile->driver);
 	cur->profile->driver = strdup(argv[0]);
 	return 0;
 }
@@ -1431,6 +1434,8 @@ do_content(struct state *cur, int argc, char **argv)
 	}
 	file = cur->file->file;
 
+	free(file->encoded_content);
+
 	file->encoded_content = malloc(len);
 	if (!file->encoded_content)
 		return 1;
@@ -1452,6 +1457,7 @@ do_prop_attr(struct state *cur, int argc, char **argv)
 	}
 	file = cur->file->file;
 
+	free(file->prop_attr);
 	file->prop_attr = malloc(len);
 	if (!file->prop_attr)
 		return 1;
@@ -1571,7 +1577,10 @@ do_acl(struct state *cur, int argc, char **argv)
 	while (argc--) {
 		unsigned int	op, method, id;
 
+		if (strlen(*argv) >= sizeof(oper))
+			goto bad;
 		strlcpy(oper, *argv++, sizeof(oper));
+
 		if ((what = strchr(oper, '=')) == NULL)
 			goto bad;
 		*what++ = '\0';
@@ -1690,6 +1699,7 @@ static void set_pin_defaults(struct sc_profile *profile, struct pin_info *pi)
 static int
 do_pin_file(struct state *cur, int argc, char **argv)
 {
+	free(cur->pin->file_name);
 	cur->pin->file_name = strdup(argv[0]);
 	return 0;
 }
@@ -1821,6 +1831,7 @@ process_macros(struct state *cur, struct block *info,
 {
 	scconf_item	*item;
 	const char	*name;
+	int		 r;
 
 	for (item = blk->items; item; item = item->next) {
 		name = item->key;
@@ -1829,27 +1840,33 @@ process_macros(struct state *cur, struct block *info,
 #ifdef DEBUG_PROFILE
 		printf("Defining %s\n", name);
 #endif
-		new_macro(cur->profile, name, item->value.list);
+		r = new_macro(cur->profile, name, item->value.list);
+		if (r != SC_SUCCESS)
+			return r;
 	}
 
-	return 0;
+	return SC_SUCCESS;
 }
 
-static void
+static int
 new_macro(sc_profile_t *profile, const char *name, scconf_list *value)
 {
 	sc_macro_t	*mac;
 
+	if (!profile || !name || !value)
+		return SC_ERROR_INVALID_ARGUMENTS;
+
 	if ((mac = find_macro(profile, name)) == NULL) {
 		mac = calloc(1, sizeof(*mac));
 		if (mac == NULL)
-			return;
+			return SC_ERROR_OUT_OF_MEMORY;
 		mac->name = strdup(name);
 		mac->next = profile->macro_list;
 		profile->macro_list = mac;
 	}
 
 	mac->value = value;
+	return SC_SUCCESS;
 }
 
 static sc_macro_t *
@@ -1971,12 +1988,62 @@ static struct block	root_ops = {
 };
 
 static int
+is_macro_character(char c) {
+	if (isalnum(c) || c == '-' || c == '_')
+		return 1;
+	return 0;
+}
+
+static void
+get_inner_word(char *str, char word[WORD_SIZE]) {
+	char *inner = NULL;
+	size_t len = 0;
+
+	inner = str;
+	while (is_macro_character(*inner)) {
+		inner++;
+		len++;
+	}
+	len = len >= WORD_SIZE ? WORD_SIZE - 1 : len;
+	memcpy(word, str, len);
+	word[len] = '\0';
+}
+
+/*
+ * Checks for a reference loop for macro named start_name in macro definitions.
+ * Function returns 1 if a reference loop is detected, 0 otherwise.
+ */
+static int
+check_macro_reference_loop(const char *start_name, sc_macro_t *macro, sc_profile_t *profile, int depth) {
+	char *macro_value = NULL;
+	char *name = NULL;
+	char word[WORD_SIZE];
+
+	if (!start_name || !macro || !profile || depth == 16)
+		return 1;
+
+	/* Find name in macro value */
+	macro_value = macro->value->data;
+	if (!(name = strchr(macro_value, '$')))
+		return 0;
+	/* Extract the macro name from the string */
+	get_inner_word(name + 1, word);
+	/* Find whether name corresponds to some other macro */
+	if (!(macro = find_macro(profile, word)))
+		return 0;
+	/* Check for loop */
+	if (!strcmp(macro->name, start_name))
+		return 1;
+	return check_macro_reference_loop(start_name, macro, profile, depth + 1);
+}
+
+static int
 build_argv(struct state *cur, const char *cmdname,
 		scconf_list *list, char **argv, unsigned int max)
 {
 	unsigned int	argc;
 	const char	*str;
-	sc_macro_t	*mac;
+	sc_macro_t	*macro;
 	int		r;
 
 	for (argc = 0; list; list = list->next) {
@@ -1987,17 +2054,35 @@ build_argv(struct state *cur, const char *cmdname,
 
 		str = list->data;
 		if (str[0] != '$') {
+			/* When str contains macro inside, macro reference loop needs to be checked */
+			char *macro_name = NULL;
+			if ((macro_name = strchr(str, '$'))) {
+				/* Macro does not to start at the first position */
+				char word[WORD_SIZE];
+				get_inner_word(macro_name + 1, word);
+				if ((macro = find_macro(cur->profile, word))
+				    && check_macro_reference_loop(macro->name, macro, cur->profile, 0)) {
+					return SC_ERROR_SYNTAX_ERROR;
+				}
+			}
+
 			argv[argc++] = list->data;
 			continue;
 		}
 
 		/* Expand macro reference */
-		if (!(mac = find_macro(cur->profile, str + 1))) {
+		if (!(macro = find_macro(cur->profile, str + 1))) {
 			parse_error(cur, "%s: unknown macro \"%s\"",
 					cmdname, str);
 			return SC_ERROR_SYNTAX_ERROR;
 		}
 
+		if (list == macro->value) {
+			return SC_ERROR_SYNTAX_ERROR;
+		}
+		if (check_macro_reference_loop(macro->name, macro, cur->profile, 0)) {
+			return SC_ERROR_SYNTAX_ERROR;
+		}
 #ifdef DEBUG_PROFILE
 		{
 			scconf_list *list;
@@ -2008,7 +2093,7 @@ build_argv(struct state *cur, const char *cmdname,
 			printf("\n");
 		}
 #endif
-		r = build_argv(cur, cmdname, mac->value,
+		r = build_argv(cur, cmdname, macro->value,
 				argv + argc, max - argc);
 		if (r < 0)
 			return r;
@@ -2241,6 +2326,9 @@ get_authid(struct state *cur, const char *value,
 		return get_uint(cur, value, type);
 	}
 
+	if (strlen(value) >= sizeof(temp))
+		return 1;
+
 	n = strcspn(value, "0123456789x");
 	strlcpy(temp, value, (sizeof(temp) > n) ? n + 1 : sizeof(temp));
 
@@ -2337,7 +2425,7 @@ struct num_exp_ctx {
 	jmp_buf		error;
 
 	int		j;
-	char		word[64];
+	char		word[WORD_SIZE];
 
 	char *		unget;
 	char *		str;
@@ -2345,7 +2433,7 @@ struct num_exp_ctx {
 	char **		argv;
 };
 
-static void	expr_eval(struct num_exp_ctx *, unsigned int *, unsigned int);
+static void	expr_eval(struct num_exp_ctx *, unsigned int *, unsigned int, int);
 
 static void
 expr_fail(struct num_exp_ctx *ctx)
@@ -2394,7 +2482,7 @@ __expr_get(struct num_exp_ctx *ctx, int eof_okay)
 	}
 	else if (*s == '$') {
 		expr_put(ctx, *s++);
-		while (isalnum((unsigned char)*s) || *s == '-' || *s == '_')
+		while (is_macro_character(*s))
 			expr_put(ctx, *s++);
 	}
 	else if (strchr("*/+-()|&", *s)) {
@@ -2433,14 +2521,19 @@ expr_expect(struct num_exp_ctx *ctx, int c)
 		expr_fail(ctx);
 }
 
+#define MAX_BRACKETS 32
 static void
-expr_term(struct num_exp_ctx *ctx, unsigned int *vp)
+expr_term(struct num_exp_ctx *ctx, unsigned int *vp, int opening_brackets)
 {
 	char	*tok;
 
 	tok = expr_get(ctx);
 	if (*tok == '(') {
-		expr_eval(ctx, vp, 1);
+		if (opening_brackets + 1 > MAX_BRACKETS) {
+			parse_error(ctx->state, "Too many \"%s\" in expression", tok);
+			expr_fail(ctx);
+		}
+		expr_eval(ctx, vp, 1, opening_brackets + 1);
 		expr_expect(ctx, ')');
 	}
 	else if (isdigit((unsigned char)*tok)) {
@@ -2468,12 +2561,12 @@ expr_term(struct num_exp_ctx *ctx, unsigned int *vp)
 }
 
 static void
-expr_eval(struct num_exp_ctx *ctx, unsigned int *vp, unsigned int pri)
+expr_eval(struct num_exp_ctx *ctx, unsigned int *vp, unsigned int pri, int opening_brackets)
 {
 	unsigned int	left, right, new_pri;
 	char		*tok, op;
 
-	expr_term(ctx, &left);
+	expr_term(ctx, &left, opening_brackets);
 
 	while (1) {
 		tok = __expr_get(ctx, 1);
@@ -2510,7 +2603,7 @@ expr_eval(struct num_exp_ctx *ctx, unsigned int *vp, unsigned int pri)
 		}
 		pri = new_pri;
 
-		expr_eval(ctx, &right, new_pri + 1);
+		expr_eval(ctx, &right, new_pri + 1, opening_brackets);
 		switch (op) {
 		case '*': left *= right; break;
 		case '/':
@@ -2543,7 +2636,7 @@ get_uint_eval(struct state *cur, int argc, char **argv, unsigned int *vp)
 		return SC_ERROR_SYNTAX_ERROR;
 	}
 
-	expr_eval(&ctx, vp, 0);
+	expr_eval(&ctx, vp, 0, 0);
 	if (ctx.str[0] || ctx.argc)
 		expr_fail(&ctx);
 

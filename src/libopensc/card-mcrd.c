@@ -19,7 +19,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -314,7 +314,7 @@ static int load_special_files(sc_card_t * card)
 
 	for (recno = 1;; recno++) {
 		u8 recbuf[256];
-		r = sc_read_record(card, recno, recbuf, sizeof(recbuf),
+		r = sc_read_record(card, recno, 0, recbuf, sizeof(recbuf),
 					SC_RECORD_BY_REC_NR);
 
 		if (r == SC_ERROR_RECORD_NOT_FOUND)
@@ -345,7 +345,7 @@ static int load_special_files(sc_card_t * card)
 
 	for (recno = 1;; recno++) {
 		u8 recbuf[256];
-		r = sc_read_record(card, recno, recbuf, sizeof(recbuf),
+		r = sc_read_record(card, recno, 0, recbuf, sizeof(recbuf),
 					SC_RECORD_BY_REC_NR);
 
 		if (r == SC_ERROR_RECORD_NOT_FOUND)
@@ -1155,7 +1155,7 @@ static int mcrd_pin_cmd(sc_card_t * card, struct sc_pin_cmd_data *data,
 			return SC_ERROR_INTERNAL;
 
 		/* read the number of tries left for the PIN */
-		r = sc_read_record (card, ref_to_record[data->pin_reference], buf, sizeof(buf), SC_RECORD_BY_REC_NR);
+		r = sc_read_record (card, ref_to_record[data->pin_reference], 0, buf, sizeof(buf), SC_RECORD_BY_REC_NR);
 		if (r < 0)
 			return SC_ERROR_INTERNAL;
 		if (buf[0] != 0x80 || buf[3] != 0x90)
@@ -1174,6 +1174,15 @@ static int mcrd_pin_cmd(sc_card_t * card, struct sc_pin_cmd_data *data,
 	SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, iso_ops->pin_cmd(card, data, tries_left));
 }
 
+static int mcrd_logout(sc_card_t * card)
+{
+	if (card->type == SC_CARD_TYPE_MCRD_ESTEID_V30) {
+		return gp_select_aid(card, &EstEID_v35_AID);
+	} else {
+		return SC_ERROR_NOT_SUPPORTED;
+	}
+}
+
 /* Driver binding */
 static struct sc_card_driver *sc_get_driver(void)
 {
@@ -1190,6 +1199,7 @@ static struct sc_card_driver *sc_get_driver(void)
 	mcrd_ops.compute_signature = mcrd_compute_signature;
 	mcrd_ops.decipher = mcrd_decipher;
 	mcrd_ops.pin_cmd = mcrd_pin_cmd;
+	mcrd_ops.logout = mcrd_logout;
 
 	return &mcrd_drv;
 }

@@ -18,7 +18,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -496,7 +496,7 @@ static int cardos_list_files(sc_card_t *card, u8 *buf, size_t buflen)
 {
 	sc_apdu_t apdu;
 	u8        rbuf[256], offset = 0;
-	const u8  *p = rbuf, *q, *tag;
+	const u8  *p, *q, *tag;
 	int       r;
 	size_t    fids = 0, len;
 
@@ -521,6 +521,7 @@ get_next_part:
 		sc_log(card->ctx,  "directory listing > 256 bytes, cutting");
 	}
 
+	p = rbuf;
 	len = apdu.resplen;
 	while (len != 0) {
 		size_t   tlen = 0, ilen = 0;

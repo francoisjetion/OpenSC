@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -158,7 +158,7 @@ static int starcos_init_card(sc_profile_t *profile, sc_pkcs15_card_t *p15card)
 	*p = ipf_file->size & 0xff;
 	ret  = sc_card_ctl(card, SC_CARDCTL_STARCOS_CREATE_FILE, &ipf_data);
 	if (ret != SC_SUCCESS) {
-		free(ipf_file);
+		sc_file_free(ipf_file);
 		return ret;
 	}
 	/* init IPF */
@@ -239,7 +239,7 @@ static int starcos_create_dir(sc_profile_t *profile, sc_pkcs15_card_t *p15card,
 	*p = ipf_file->size & 0xff;
 	ret  = sc_card_ctl(card, SC_CARDCTL_STARCOS_CREATE_FILE, &ipf_data);
 	if (ret != SC_SUCCESS) {
-		free(ipf_file);
+		sc_file_free(ipf_file);
 		return ret;
 	}
 	/* init IPF */

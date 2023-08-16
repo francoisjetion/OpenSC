@@ -74,6 +74,9 @@ app <replaceable>application</replaceable> {
 			specifies one of:
 			<itemizedlist>
 				<listitem><para>
+						<literal><replaceable>filename</replaceable></literal>: Configuration block for the application with specified file path.
+				</para></listitem>
+				<listitem><para>
 						<literal>default</literal>: The fall-back configuration block for all applications
 				</para></listitem>
 				<listitem><para>
@@ -295,6 +298,9 @@ app <replaceable>application</replaceable> {
 							</para></listitem>
 							<listitem><para>
 									<literal>edo</literal>: See <xref linkend="edo"/>
+							</para></listitem>
+							<listitem><para>
+									<literal>eoi</literal>: See <xref linkend="eoi"/>
 							</para></listitem>
 							<listitem><para>
 									<literal>myeid</literal>: See <xref linkend="myeid"/>
@@ -772,6 +778,28 @@ app <replaceable>application</replaceable> {
 			</variablelist>
 		</refsect2>
 
+		<refsect2 id="eoi">
+			<title>Configuration Options for Slovenian eID Card</title>
+			<variablelist>
+				<varlistentry>
+					<term>
+						<option>can = <replaceable>value</replaceable>;</option>
+					</term>
+					<listitem><para>
+							CAN (Card Access Number – 6 digit number
+							printed on the right bottom corner of the
+							front side of the document) is required
+							to establish connection with the card.
+							It might be overwritten by <literal>EOI_CAN</literal>
+							environment variable. As CAN is also stored on the card
+							(in encrypted form) it can be used to automatically establish
+							secure connection, but only if the card is accessed over the
+							contact interface.
+					</para></listitem>
+				</varlistentry>
+			</variablelist>
+		</refsect2>
+
 		<refsect2 id="card_atr">
 			<title>Configuration based on ATR</title>
 			<para>
@@ -1123,13 +1151,46 @@ app <replaceable>application</replaceable> {
 			<variablelist>
 				<varlistentry>
 					<term>
-						<option>use_file_caching = <replaceable>bool</replaceable>;</option>
+						<option>use_file_caching = <replaceable>value</replaceable>;</option>
 					</term>
 					<listitem><para>
 							Whether to cache the card's files (e.g.
 							certificates) on disk in
-							<option>file_cache_dir</option> (Default:
-							<literal>false</literal>).
+							<option>file_cache_dir</option>.
+							Possible parameters:
+							<itemizedlist>
+								<listitem><para>
+									<literal>yes</literal>: Cache all files (public and private).
+								</para></listitem>
+								<listitem><para>
+									<literal>public</literal>: Cache only public files.
+								</para></listitem>
+								<listitem><para>
+									<literal>no</literal>: File caching disabled.
+								</para></listitem>
+							</itemizedlist>
+							(Default: <literal>public</literal>
+							for the following card drivers
+							<literal>akis</literal>,
+							<literal>atrust-acos</literal>,
+							<literal>belpic</literal>,
+							<literal>cac1</literal>,
+							<literal>cac</literal>,
+							<literal>coolkey</literal>,
+							<literal>dnie</literal>,
+							<literal>edo</literal>,
+							<literal>esteid2018</literal>,
+							<literal>flex</literal>,
+							<literal>cyberflex</literal>,
+							<literal>gemsafeV1</literal>,
+							<literal>idprime</literal>,
+							<literal>itacns</literal>,
+							<literal>jpki</literal>,
+							<literal>MaskTech</literal>,
+							<literal>mcrd</literal>,
+							<literal>npa</literal>,
+							<literal>nqapplet</literal>,
+							<literal>tcos</literal> and otherwise <literal>no</literal>).
 						</para>
 						<para>
 							If caching is done by a system process, the
@@ -1173,6 +1234,16 @@ app <replaceable>application</replaceable> {
 							cached information. Note that the cached files
 							may contain personal data such as name and mail
 							address.
+						</para>
+						<para>
+                            The PIV-II card driver supports the history object's
+                            list of retired keys and certificates if they are
+							readable in the file cache directory. 
+							If the specified object's URL is 
+							<literal>"http://"</literal><replaceable>DNS name</replaceable><literal>"/"</literal><replaceable>ASCII-HEX OffCardKeyHistoryFile</replaceable>,
+							then the searches for the file name
+							<replaceable>OffCardKeyHistoryFile</replaceable>
+							in the cache directory.
 					</para></listitem>
 				</varlistentry>
 				<varlistentry>
@@ -1384,6 +1455,22 @@ app <replaceable>application</replaceable> {
 										<literal>false</literal>)
 								</para></listitem>
 							</varlistentry>
+							<varlistentry>
+								<term>
+									<option>user_pin = <replaceable>name</replaceable>;</option>
+								</term>
+								<listitem><para>
+									Name of the User PIN object that will be used as the main PIN.
+								</para></listitem>
+							</varlistentry>
+							<varlistentry>
+								<term>
+									<option>sign_pin = <replaceable>name</replaceable>;</option>
+								</term>
+								<listitem><para>
+									Name of the PIN object that will be used for signing.
+								</para></listitem>
+							</varlistentry>
 						</variablelist>
 					</listitem>
 				</varlistentry>
@@ -1425,10 +1512,13 @@ app <replaceable>application</replaceable> {
 						<option>slots_per_card = <replaceable>num</replaceable>;</option>
 					</term>
 					<listitem><para>
-							Maximum number of slots per smart card (Default:
-							<literal>4</literal>).  If the card has fewer keys
+							Maximum number of PIN slots per smart card (Default:
+							<literal>4</literal>).  If the card has fewer PINs
 							than defined here, the remaining number of slots
-							will be empty.
+                            will be empty. For Firefox, Chrome and Chromium, the
+							<option>slots_per_card</option> is set to <literal>1</literal>,
+							to avoid prompting for unrelated PINs.  Typically, this
+							effectively disables signature PINs and keys.
 					</para></listitem>
 				</varlistentry>
 				<varlistentry>

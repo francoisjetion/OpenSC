@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -156,7 +156,7 @@ static void do_esteid(sc_card_t *card)
 
 		/* print the counters */
 		for (i = 1; i <= 4; i++) {
-			r = sc_read_record(card, i, buff, 128, SC_RECORD_BY_REC_NR);
+			r = sc_read_record(card, i, 0, buff, 128, SC_RECORD_BY_REC_NR);
 			if (r < 0)
 				goto out;
 			key_used[i - 1] = 0xffffff - ((unsigned char) buff[0xc] * 65536
@@ -180,7 +180,7 @@ static void do_esteid(sc_card_t *card)
 	}
 
 	for (i = 0; esteid_data[i].recno != 0; i++) {
-		r = sc_read_record(card, esteid_data[i].recno, buff, 50, SC_RECORD_BY_REC_NR);
+		r = sc_read_record(card, esteid_data[i].recno, 0, buff, 50, SC_RECORD_BY_REC_NR);
 		if (r < 0) {
 			fprintf (stderr, "Failed to read record %d from card: %s\n",
 						esteid_data[i].recno, sc_strerror (r));
@@ -401,7 +401,7 @@ int main(int argc, char **argv)
 		sc_strerror(r));
 		return 1;
 	}
-	r = util_connect_card(ctx, &card, opt_reader, opt_wait, 0);
+	r = util_connect_card(ctx, &card, opt_reader, opt_wait);
 	if (r) {
 		fprintf(stderr, "Failed to connect to card: %s\n", sc_strerror(r));
 		sc_release_context(ctx);

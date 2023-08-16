@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 
@@ -111,16 +111,9 @@ static int do_convert_bignum(sc_pkcs15_bignum_t *dst, const BIGNUM *src)
 	return 1;
 }
 
-static int	charge = 0;
 static void print_openssl_error(void)
 {
 	long r;
-
-	if (!charge)
-	{
-		ERR_load_crypto_strings();
-		charge = 1;
-	}
 
 	while ((r = ERR_get_error()) != 0)
 		printf("%s\n", ERR_error_string(r, NULL));
@@ -391,7 +384,7 @@ int main(int argc, char *argv[])
 				opt_wait = 1;
 				break;
 			case 'g':
-				if(keylen == 0) keylen = 1536;
+				if(keylen == 0) keylen = 2048;
 				break;
 			case 'o':
 				overwrite = 1;
@@ -435,6 +428,9 @@ int main(int argc, char *argv[])
 	memset(&ctx_param, 0, sizeof(ctx_param));
 	ctx_param.ver      = 0;
 	ctx_param.app_name = argv[0];
+	ctx_param.debug    = verbose;
+	if (verbose)
+		ctx_param.debug_file = stderr;
 
 	r = sc_context_create(&ctx, &ctx_param);
 	if (r)
@@ -453,7 +449,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	r = util_connect_card(ctx, &card, opt_reader, opt_wait, 0);
+	r = util_connect_card(ctx, &card, opt_reader, opt_wait);
 	if (r)
 		goto out;
 

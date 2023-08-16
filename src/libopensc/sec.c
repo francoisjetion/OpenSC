@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -336,4 +336,36 @@ int sc_build_pin(u8 *buf, size_t buflen, struct sc_pin_cmd_pin *pin, int pad)
 	}
 
 	return i;
+}
+
+int
+sc_encrypt_sym(struct sc_card *card, const u8 *plaintext, size_t plaintext_len,
+		u8 *out, size_t *outlen)
+{
+	int r;
+
+	if (card == NULL)
+		return SC_ERROR_INVALID_ARGUMENTS;
+
+	LOG_FUNC_CALLED(card->ctx);
+	if (card->ops->encrypt_sym == NULL)
+		SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, SC_ERROR_NOT_SUPPORTED);
+	r = card->ops->encrypt_sym(card, plaintext, plaintext_len, out, outlen);
+	SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, r);
+}
+
+int
+sc_decrypt_sym(struct sc_card *card, const u8 *data, size_t data_len,
+		u8 *out, size_t *outlen)
+{
+	int r;
+
+	if (card == NULL)
+		return SC_ERROR_INVALID_ARGUMENTS;
+
+	LOG_FUNC_CALLED(card->ctx);
+	if (card->ops->decrypt_sym == NULL)
+		SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, SC_ERROR_NOT_SUPPORTED);
+	r = card->ops->decrypt_sym(card, data, data_len, out, outlen);
+	SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, r);
 }

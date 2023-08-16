@@ -13,7 +13,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -108,9 +108,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size)
 
 	sc_pkcs15_parse_unusedspace(buf, buf_len, p15card);
 
-	sc_pkcs15_card_free(p15card);
-
 err:
+	sc_pkcs15_card_free(p15card);
 	sc_disconnect_card(card);
 	sc_release_context(ctx);
 	return 0;

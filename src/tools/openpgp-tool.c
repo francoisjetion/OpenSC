@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -520,6 +520,7 @@ int do_genkey(sc_card_t *card, u8 in_key_id, const char *keytype)
 		if (sc_select_file(card, &path, &file) >= 0) {
 			u8 attrs[6];	/* algorithm attrs DO for RSA is <= 6 bytes */
 
+			sc_file_free(file);
 			r = sc_read_binary(card, 0, attrs, sizeof(attrs), 0);
 			if (r >= 5 && attrs[0] == SC_OPENPGP_KEYALGO_RSA) {
 				expolen = (unsigned short) attrs[3] << 8
@@ -554,6 +555,7 @@ int do_genkey(sc_card_t *card, u8 in_key_id, const char *keytype)
 
 	sc_format_path("006E007300C5", &path);
 	r = sc_select_file(card, &path, &file);
+	sc_file_free(file);
 	if (r < 0) {
 		util_error("failed to retrieve fingerprints: %s", sc_strerror(r));
 		return EXIT_FAILURE;
@@ -699,6 +701,9 @@ int main(int argc, char **argv)
 	memset(&ctx_param, 0, sizeof(ctx_param));
 	ctx_param.ver      = 0;
 	ctx_param.app_name = app_name;
+	ctx_param.debug    = verbose;
+	if (verbose)
+		ctx_param.debug_file = stderr;
 
 	r = sc_context_create(&ctx, &ctx_param);
 	if (r) {
@@ -714,7 +719,7 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
-	r = util_connect_card(ctx, &card, opt_reader, opt_wait, verbose);
+	r = util_connect_card(ctx, &card, opt_reader, opt_wait);
 	if (r) {
 		sc_release_context(ctx);
 		util_fatal("failed to connect to card: %s", sc_strerror(r));

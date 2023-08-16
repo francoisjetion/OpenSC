@@ -13,7 +13,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307,
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301
  * USA
  */
 
@@ -172,7 +172,7 @@ print_generic(FILE *f, CK_LONG type, CK_VOID_PTR value, CK_ULONG size, CK_VOID_P
 			ascii_ptr++;
 		}
 
-		/* padd */
+		/* padding */
 		while (strlen(hex) < 3*16)
 			strcat(hex, "   ");
 		fprintf(f, "\n    %08X  %s %s", offset, hex, ascii);
@@ -745,6 +745,7 @@ type_spec ck_attribute_specs[] = {
   { CKA_EXPONENT_1        , "CKA_EXPONENT_1       ", print_generic, NULL },
   { CKA_EXPONENT_2        , "CKA_EXPONENT_2       ", print_generic, NULL },
   { CKA_COEFFICIENT       , "CKA_COEFFICIENT      ", print_generic, NULL },
+  { CKA_PUBLIC_KEY_INFO   , "CKA_PUBLIC_KEY_INFO  ", print_generic, NULL },
   { CKA_PRIME             , "CKA_PRIME            ", print_generic, NULL },
   { CKA_SUBPRIME          , "CKA_SUBPRIME         ", print_generic, NULL },
   { CKA_BASE              , "CKA_BASE             ", print_generic, NULL },
@@ -758,6 +759,7 @@ type_spec ck_attribute_specs[] = {
   { CKA_ALWAYS_SENSITIVE  , "CKA_ALWAYS_SENSITIVE ", print_boolean, NULL },
   { CKA_KEY_GEN_MECHANISM , "CKA_KEY_GEN_MECHANISM", print_boolean, NULL },
   { CKA_MODIFIABLE        , "CKA_MODIFIABLE       ", print_boolean, NULL },
+  { CKA_COPYABLE          , "CKA_COPYABLE         ", print_boolean, NULL },
   { CKA_EC_PARAMS         , "CKA_EC_PARAMS        ", print_generic, NULL },
   { CKA_ECDSA_PARAMS      , "CKA_ECDSA_PARAMS     ", print_generic, NULL },
   { CKA_EC_POINT          , "CKA_EC_POINT         ", print_generic, NULL },

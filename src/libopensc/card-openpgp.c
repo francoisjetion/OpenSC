@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 /*
@@ -129,7 +129,7 @@ static pgp_ec_curves_t	ec_curves_gnuk[] = {
 
 static int		pgp_get_card_features(sc_card_t *card);
 static int		pgp_finish(sc_card_t *card);
-static void		pgp_iterate_blobs(pgp_blob_t *, int, void (*func)());
+static void		pgp_free_blobs(pgp_blob_t *);
 
 static int		pgp_get_blob(sc_card_t *card, pgp_blob_t *blob,
 				 unsigned int id, pgp_blob_t **ret);
@@ -258,7 +258,7 @@ static pgp_do_info_t	pgp34_objects[] = {	/**** OpenPGP card spec 3.4 ****/
 	{ 0x5f50, SIMPLE,      READ_ALWAYS | WRITE_PIN3,  sc_get_data,        sc_put_data },
 	{ 0x5f52, SIMPLE,      READ_ALWAYS | WRITE_NEVER, sc_get_data,        NULL        },
 	/* DO 7F21 is CONSTRUCTED in spec; we treat it as SIMPLE: no need to parse TLV */
-	{ DO_CERT, SIMPLE,      READ_ALWAYS | WRITE_PIN3,  sc_get_data,        sc_put_data },
+	{ DO_CERT, SIMPLE,      READ_ALWAYS | WRITE_PIN3,  sc_get_data,       sc_put_data },
 	{ 0x7f48, CONSTRUCTED, READ_NEVER  | WRITE_NEVER, NULL,               NULL        },
 	{ 0x7f49, CONSTRUCTED, READ_ALWAYS | WRITE_NEVER, NULL,               NULL        },
 	{ DO_AUTH,     CONSTRUCTED, READ_ALWAYS | WRITE_NEVER, pgp_get_pubkey,     NULL   },
@@ -947,7 +947,7 @@ pgp_finish(sc_card_t *card)
 
 		if (priv != NULL) {
 			/* delete fake file hierarchy */
-			pgp_iterate_blobs(priv->mf, 99, pgp_free_blob);
+			pgp_free_blobs(priv->mf);
 
 			/* delete private data */
 			free(priv);
@@ -1147,23 +1147,21 @@ pgp_free_blob(pgp_blob_t *blob)
 
 
 /**
- * Internal: iterate through the blob tree, calling a function for each blob.
+ * Internal: iterate through the blob tree, calling pgp_free_blob for each blob.
  */
 static void
-pgp_iterate_blobs(pgp_blob_t *blob, int level, void (*func)())
+pgp_free_blobs(pgp_blob_t *blob)
 {
 	if (blob) {
-		if (level > 0) {
-			pgp_blob_t *child = blob->files;
+		pgp_blob_t *child = blob->files;
 
-			while (child != NULL) {
-				pgp_blob_t *next = child->next;
+		while (child != NULL) {
+			pgp_blob_t *next = child->next;
 
-				pgp_iterate_blobs(child, level-1, func);
-				child = next;
-			}
+			pgp_free_blobs(child);
+			child = next;
 		}
-		func(blob);
+		pgp_free_blob(blob);
 	}
 }
 
@@ -1226,6 +1224,7 @@ pgp_enumerate_blob(sc_card_t *card, pgp_blob_t *blob)
 {
 	const u8	*in;
 	int		r;
+	sc_file_t	*file = NULL;
 
 	if (blob->files != NULL)
 		return SC_SUCCESS;
@@ -1282,9 +1281,15 @@ pgp_enumerate_blob(sc_card_t *card, pgp_blob_t *blob)
 
 		/* create fake file system hierarchy by
 		 * using constructed DOs as DF */
-		if ((new = pgp_new_blob(card, blob, tag, sc_file_new())) == NULL)
+		file = sc_file_new();
+		if ((new = pgp_new_blob(card, blob, tag, file)) == NULL) {
+			sc_file_free(file);
 			return SC_ERROR_OUT_OF_MEMORY;
-		pgp_set_blob(new, data, len);
+		}
+		if (pgp_set_blob(new, data, len) != SC_SUCCESS) {
+			sc_file_free(file);
+			return SC_ERROR_OUT_OF_MEMORY;
+		}
 		in = data + len;
 	}
 
@@ -1572,7 +1577,7 @@ pgp_get_challenge(struct sc_card *card, u8 *rnd, size_t len)
  */
 static int
 pgp_read_binary(sc_card_t *card, unsigned int idx,
-		u8 *buf, size_t count, unsigned long flags)
+		u8 *buf, size_t count, unsigned long *flags)
 {
 	struct pgp_priv_data *priv = DRVDATA(card);
 	pgp_blob_t	*blob;
@@ -1755,7 +1760,7 @@ pgp_get_pubkey_pem(sc_card_t *card, unsigned int tag, u8 *buf, size_t buf_len)
 		p15pubkey.u.eddsa.pubkey.len = 0;
 	}
 	sc_pkcs15_erase_pubkey(&p15pubkey);
-	
+
 	LOG_TEST_RET(card->ctx, r, "public key encoding failed");
 
 	if (len > buf_len)
@@ -1764,6 +1769,48 @@ pgp_get_pubkey_pem(sc_card_t *card, unsigned int tag, u8 *buf, size_t buf_len)
 	free(data);
 
 	LOG_FUNC_RETURN(card->ctx, (int)len);
+}
+
+
+/**
+ * Internal: SELECT DATA - selects a DO within a DO tag with several instances
+ * (supported since OpenPGP Card v3 for DO 7F21 only, see section 7.2.5 of the specification;
+ *  this enables us to store multiple Card holder certificates in DO 7F21)
+ *
+ * p1: number of an instance (DO 7F21: 0x00 for AUT, 0x01 for DEC and 0x02 for SIG)
+ */
+static int
+pgp_select_data(sc_card_t *card, u8 p1)
+{
+	sc_apdu_t	apdu;
+	u8	apdu_data[6];
+	int	r;
+	struct pgp_priv_data *priv = DRVDATA(card);
+
+	LOG_FUNC_CALLED(card->ctx);
+
+	if (priv->bcd_version < OPENPGP_CARD_3_0)
+		LOG_FUNC_RETURN(card->ctx, SC_ERROR_NOT_SUPPORTED);
+
+	sc_log(card->ctx, "select data with: %u", p1);
+
+	// create apdu data (taken from spec: SELECT DATA 7.2.5.)
+	apdu_data[0] = 0x60;
+	apdu_data[1] = 0x04;
+	apdu_data[2] = 0x5c;
+	apdu_data[3] = 0x02;
+	apdu_data[4] = 0x7f;
+	apdu_data[5] = 0x21;
+
+	// apdu, cla, ins, p1, p2, data, datalen, resp, resplen
+	sc_format_apdu_ex(&apdu, 0x00, 0xA5, p1, 0x04, apdu_data, sizeof(apdu_data), NULL, 0);
+
+	// transmit apdu
+	r = sc_transmit_apdu(card, &apdu);
+	LOG_TEST_RET(card->ctx, r, "APDU transmit failed");
+	r = sc_check_sw(card, apdu.sw1, apdu.sw2);
+	LOG_TEST_RET(card->ctx, r, "Card returned error");
+	LOG_FUNC_RETURN(card->ctx, r);
 }
 
 
@@ -1805,7 +1852,6 @@ pgp_get_data(sc_card_t *card, unsigned int tag, u8 *buf, size_t buf_len)
 
 	LOG_FUNC_RETURN(card->ctx, (int)apdu.resplen);
 }
-
 
 /**
  * Internal: write certificate for Gnuk.
@@ -2138,8 +2184,7 @@ pgp_set_security_env(sc_card_t *card,
 	/* The SC_SEC_ENV_ALG_PRESENT is set always so let it pass for GNUK */
 	if ((env->flags & SC_SEC_ENV_ALG_PRESENT)
 		&& (env->algorithm != SC_ALGORITHM_RSA)
-		&& (priv->bcd_version < OPENPGP_CARD_3_0)
-		&& (card->type != SC_CARD_TYPE_OPENPGP_GNUK))
+		&& (priv->bcd_version < OPENPGP_CARD_3_0))
 		LOG_TEST_RET(card->ctx, SC_ERROR_INVALID_ARGUMENTS,
 				"only RSA algorithm supported");
 
@@ -2652,15 +2697,23 @@ pgp_calculate_and_store_fingerprint(sc_card_t *card, time_t ctime,
 
 	/* RSA */
 	if (key_info->algorithm == SC_OPENPGP_KEYALGO_RSA) {
+		unsigned short bytes_length = 0;
+
 		*p = 1; /* Algorithm ID, RSA */
 		p += 1;
+
+		/* Modulus */
+		bytes_length = BYTES4BITS(key_info->u.rsa.modulus_len);
 		ushort2bebytes(p, (unsigned short)key_info->u.rsa.modulus_len);
 		p += 2;
-		memcpy(p, key_info->u.rsa.modulus, (BYTES4BITS(key_info->u.rsa.modulus_len)));
-		p += (key_info->u.rsa.modulus_len >> 3);
-		ushort2bebytes(++p, (unsigned short)key_info->u.rsa.exponent_len);
+		memcpy(p, key_info->u.rsa.modulus, bytes_length);
+		p += bytes_length;
+
+		/* Exponent */
+		bytes_length = BYTES4BITS(key_info->u.rsa.exponent_len);
+		ushort2bebytes(p, (unsigned short)key_info->u.rsa.exponent_len);
 		p += 2;
-		memcpy(p, key_info->u.rsa.exponent, (BYTES4BITS(key_info->u.rsa.exponent_len)));
+		memcpy(p, key_info->u.rsa.exponent, bytes_length);
 	}
 	/* ECC */
 	else if (key_info->algorithm == SC_OPENPGP_KEYALGO_ECDH
@@ -2796,6 +2849,7 @@ pgp_update_pubkey_blob(sc_card_t *card, sc_cardctl_openpgp_keygen_info_t *key_in
 
 	sc_log(card->ctx, "Updating blob %04X's content.", blob_id);
 	r = pgp_set_blob(pk_blob, data, len);
+	free(data);
 	LOG_TEST_RET(card->ctx, r, "Cannot update blob content");
 	LOG_FUNC_RETURN(card->ctx, r);
 }
@@ -2903,13 +2957,13 @@ pgp_update_card_algorithms(sc_card_t *card, sc_cardctl_openpgp_keygen_info_t *ke
 {
 	sc_algorithm_info_t *algo;
 	u8 id = key_info->key_id;
+	struct pgp_priv_data *priv = DRVDATA(card);
 
 	LOG_FUNC_CALLED(card->ctx);
 
 	/* protect incompatible cards against non-RSA */
 	if (key_info->algorithm != SC_OPENPGP_KEYALGO_RSA
-		&& card->type < SC_CARD_TYPE_OPENPGP_V3
-		&& card->type != SC_CARD_TYPE_OPENPGP_GNUK)
+		&& priv->bcd_version < OPENPGP_CARD_3_0)
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_NOT_SUPPORTED);
 
 	if (id > card->algorithm_count) {
@@ -2951,13 +3005,13 @@ pgp_gen_key(sc_card_t *card, sc_cardctl_openpgp_keygen_info_t *key_info)
 	size_t apdu_le;
 	size_t resplen = 0;
 	int r = SC_SUCCESS;
+	struct pgp_priv_data *priv = DRVDATA(card);
 
 	LOG_FUNC_CALLED(card->ctx);
 
 	/* protect incompatible cards against non-RSA */
 	if (key_info->algorithm != SC_OPENPGP_KEYALGO_RSA
-		&& card->type < SC_CARD_TYPE_OPENPGP_V3
-		&& card->type != SC_CARD_TYPE_OPENPGP_GNUK)
+		&& priv->bcd_version < OPENPGP_CARD_3_0)
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_NOT_SUPPORTED);
 	if (key_info->algorithm == SC_OPENPGP_KEYALGO_EDDSA
 		&& card->type != SC_CARD_TYPE_OPENPGP_GNUK)
@@ -3317,13 +3371,13 @@ pgp_store_key(sc_card_t *card, sc_cardctl_openpgp_keystore_info_t *key_info)
 	u8 *data = NULL;
 	size_t len = 0;
 	int r;
+	struct pgp_priv_data *priv = DRVDATA(card);
 
 	LOG_FUNC_CALLED(card->ctx);
 
 	/* protect incompatible cards against non-RSA */
 	if (key_info->algorithm != SC_OPENPGP_KEYALGO_RSA
-		&& card->type < SC_CARD_TYPE_OPENPGP_V3
-		&& card->type != SC_CARD_TYPE_OPENPGP_GNUK)
+		&& priv->bcd_version < OPENPGP_CARD_3_0)
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_NOT_SUPPORTED);
 
 	/* Validate */
@@ -3514,13 +3568,15 @@ pgp_card_ctl(sc_card_t *card, unsigned long cmd, void *ptr)
 		memmove((sc_serial_number_t *) ptr, &card->serialnr, sizeof(card->serialnr));
 		LOG_FUNC_RETURN(card->ctx, SC_SUCCESS);
 		break;
-
+	case SC_CARDCTL_OPENPGP_SELECT_DATA:
+		r = pgp_select_data(card, *((u8 *) ptr));
+		LOG_FUNC_RETURN(card->ctx, r);
+		break;
 #ifdef ENABLE_OPENSSL
 	case SC_CARDCTL_OPENPGP_GENERATE_KEY:
 		r = pgp_gen_key(card, (sc_cardctl_openpgp_keygen_info_t *) ptr);
 		LOG_FUNC_RETURN(card->ctx, r);
 		break;
-
 	case SC_CARDCTL_OPENPGP_STORE_KEY:
 		r = pgp_store_key(card, (sc_cardctl_openpgp_keystore_info_t *) ptr);
 		LOG_FUNC_RETURN(card->ctx, r);
@@ -3598,8 +3654,10 @@ pgp_delete_file(sc_card_t *card, const sc_path_t *path)
 	blob = priv->current;
 
 	/* don't try to delete MF */
-	if (blob == priv->mf)
+	if (blob == priv->mf) {
+		sc_file_free(file);
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_NOT_SUPPORTED);
+	}
 
 	if (card->type != SC_CARD_TYPE_OPENPGP_GNUK &&
 		(file->id == DO_SIGN_SYM || file->id == DO_ENCR_SYM || file->id == DO_AUTH_SYM)) {
@@ -3619,6 +3677,7 @@ pgp_delete_file(sc_card_t *card, const sc_path_t *path)
 		/* call pgp_put_data() with zero-sized NULL-buffer to zap the DO contents */
 		r = pgp_put_data(card, file->id, NULL, 0);
 	}
+	sc_file_free(file);
 
 	/* set "current" blob to parent */
 	priv->current = blob->parent;

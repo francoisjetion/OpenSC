@@ -6,18 +6,21 @@ on:
       - '**.c'
       - '**.h'
       - '**.m'
+      - '**.sh'
       - .github/workflows/macos.yml
-      - .github/setup-macos.sh
-      - .github/cleanup-macos.sh
-      - .github/build.sh
-      - .github/push-artifacts.sh
+      - '**.am'
+      - MacOSX/**
+      - configure.ac
   push:
+
+permissions:
+  contents: read  #  to fetch code (actions/checkout)
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-12
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - run: .github/setup-macos.sh
         env:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
@@ -28,7 +31,7 @@ jobs:
           DEVELOPMENT_TEAM: ${{ secrets.DEVELOPMENT_TEAM }}
           INSTALLER_SIGN_IDENTITY: ${{ secrets.INSTALLER_SIGN_IDENTITY }}
       - name: Cache build artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: opensc-build-macos
           path:
@@ -39,15 +42,17 @@ jobs:
           PASS_SECRETS_TAR_ENC: ${{ secrets.PASS_SECRETS_TAR_ENC }}
 
   push-artifacts:
-    runs-on: macos-latest
+    runs-on: macos-12
     needs: [build]
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Pull build artifacts
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: opensc-build-macos
       - run: git config --global user.email "builds@github.com"
       - run: git config --global user.name "Github Actions";
       - run: .github/push_artifacts.sh "Github Actions ${GITHUB_REF}"
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         if: ${{ github.repository == 'OpenSC/OpenSC' }}

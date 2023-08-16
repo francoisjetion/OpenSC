@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -81,10 +81,6 @@ static int muscle_match_card(sc_card_t *card)
 	u8 response[64];
 	int r;
 
-	/* Since we send an APDU, the card's logout function may be called...
-	 * however it's not always properly nulled out... */
-	card->ops->logout = NULL;
-
 	if (msc_select_applet(card, muscleAppletId, sizeof muscleAppletId) == 1) {
 		/* Muscle applet is present, check the protocol version to be sure */
 		sc_format_apdu(card, &apdu, SC_APDU_CASE_2, 0x3C, 0x00, 0x00);
@@ -122,7 +118,9 @@ static unsigned short muscle_parse_singleAcl(const sc_acl_entry_t* acl)
 		case SC_AC_UNKNOWN:
 			break;
 		case SC_AC_CHV:
-			acl_entry |= (1 << key); /* Assuming key 0 == SO */
+			/* Ignore shift with more bits that acl_entry has */
+			if ((size_t) key < sizeof(acl_entry) * 8)
+				acl_entry |= (1u << key); /* Assuming key 0 == SO */
 			break;
 		case SC_AC_AUT:
 		case SC_AC_TERM:
@@ -196,7 +194,7 @@ static int muscle_create_file(sc_card_t *card, sc_file_t *file)
 	return r;
 }
 
-static int muscle_read_binary(sc_card_t *card, unsigned int idx, u8* buf, size_t count, unsigned long flags)
+static int muscle_read_binary(sc_card_t *card, unsigned int idx, u8* buf, size_t count, unsigned long *flags)
 {
 	mscfs_t *fs = MUSCLE_FS(card);
 	int r;
@@ -270,12 +268,14 @@ static int muscle_delete_mscfs_file(sc_card_t *card, mscfs_file_t *file_data)
 	msc_id id = file_data->objectId;
 	u8* oid = id.id;
 	int r;
+	file_data->deleteFile = 1;
 
 	if(!file_data->ef) {
 		int x;
 		mscfs_file_t *childFile;
 		/* Delete children */
-		mscfs_check_cache(fs);
+		r = mscfs_check_cache(fs);
+		if(r < 0) SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, r);
 
 		sc_log(card->ctx, 
 			"DELETING Children of: %02X%02X%02X%02X\n",
@@ -285,13 +285,14 @@ static int muscle_delete_mscfs_file(sc_card_t *card, mscfs_file_t *file_data)
 			childFile = &fs->cache.array[x];
 			objectId = childFile->objectId;
 
-			if(0 == memcmp(oid + 2, objectId.id, 2)) {
+			if(0 == memcmp(oid + 2, objectId.id, 2) && !childFile->deleteFile) {
 				sc_log(card->ctx, 
 					"DELETING: %02X%02X%02X%02X\n",
 					objectId.id[0],objectId.id[1],
 					objectId.id[2],objectId.id[3]);
 				r = muscle_delete_mscfs_file(card, childFile);
 				if(r < 0) SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE,r);
+
 			}
 		}
 		oid[0] = oid[2];
@@ -322,6 +323,10 @@ static int muscle_delete_file(sc_card_t *card, const sc_path_t *path_in)
 
 	r = mscfs_loadFileInfo(fs, path_in->value, path_in->len, &file_data, NULL);
 	if(r < 0) SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE,r);
+	for(int x = 0; x < fs->cache.size; x++) {
+		mscfs_file_t *file = &fs->cache.array[x];
+		file->deleteFile = 0;
+	}
 	r = muscle_delete_mscfs_file(card, file_data);
 	mscfs_clear_cache(fs);
 	if(r < 0) SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE,r);
@@ -369,7 +374,8 @@ static int select_item(sc_card_t *card, const sc_path_t *path_in, sc_file_t ** f
 	int objectIndex;
 	u8* oid;
 
-	mscfs_check_cache(fs);
+	r = mscfs_check_cache(fs);
+	if(r < 0) SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, r);
 	r = mscfs_loadFileInfo(fs, path_in->value, path_in->len, &file_data, &objectIndex);
 	if(r < 0) SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE,r);
 
@@ -516,10 +522,11 @@ static int muscle_list_files(sc_card_t *card, u8 *buf, size_t bufLen)
 {
 	muscle_private_t* priv = MUSCLE_DATA(card);
 	mscfs_t *fs = priv->fs;
-	int x;
+	int x, r;
 	int count = 0;
 
-	mscfs_check_cache(priv->fs);
+	r = mscfs_check_cache(priv->fs);
+	if(r < 0) SC_FUNC_RETURN(card->ctx, SC_LOG_DEBUG_VERBOSE, r);
 
 	for(x = 0; x < fs->cache.size; x++) {
 		u8* oid = fs->cache.array[x].objectId.id;
@@ -845,6 +852,19 @@ static int muscle_card_reader_lock_obtained(sc_card_t *card, int was_reset)
 	LOG_FUNC_RETURN(card->ctx, r);
 }
 
+static int muscle_logout(sc_card_t *card)
+{
+	int r = SC_ERROR_NOT_SUPPORTED;
+
+	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
+
+	if (msc_select_applet(card, muscleAppletId, sizeof muscleAppletId) == 1) {
+		r = SC_SUCCESS;
+	}
+
+	LOG_FUNC_RETURN(card->ctx, r);
+}
+
 
 static struct sc_card_driver * sc_get_driver(void)
 {
@@ -873,6 +893,7 @@ static struct sc_card_driver * sc_get_driver(void)
 	muscle_ops.delete_file = muscle_delete_file;
 	muscle_ops.list_files = muscle_list_files;
 	muscle_ops.card_reader_lock_obtained = muscle_card_reader_lock_obtained;
+	muscle_ops.logout = muscle_logout;
 
 	return &muscle_drv;
 }

@@ -1,10 +1,10 @@
 /**
  * cwa14890.c: Implementation of Secure Messaging according CWA-14890-1 and CWA-14890-2 standards.
- * 
+ *
  * Copyright (C) 2010 Juan Antonio Martinez <jonsito@terra.es>
  *
  * This work is derived from many sources at OpenSC Project site,
- * (see references) and the information made public by Spanish 
+ * (see references) and the information made public by Spanish
  * Direccion General de la Policia y de la Guardia Civil
  *
  * This library is free software; you can redistribute it and/or
@@ -19,7 +19,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #define __CWA14890_C__
@@ -47,10 +47,6 @@
 # include <openssl/core_names.h>
 # include <openssl/param_build.h>
 # include <openssl/provider.h>
-#endif
-
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L
-	static OSSL_PROVIDER *legacy_provider = NULL;
 #endif
 
 #define MAX_RESP_BUFFER_SIZE 2048
@@ -142,7 +138,7 @@ static int cwa_increase_ssc(sc_card_t * card)
 /**
  * ISO 7816 padding.
  *
- * Adds an 0x80 at the end of buffer and as many zeroes to get len 
+ * Adds an 0x80 at the end of buffer and as many zeroes to get len
  * multiple of 8
  * Buffer must be long enough to store additional bytes
  *
@@ -393,7 +389,7 @@ static int cwa_verify_icc_certificates(sc_card_t * card,
 /**
  * Verify CVC certificates in SM establishment process.
  *
- * This is done by mean of 00 2A 00 AE 
+ * This is done by mean of 00 2A 00 AE
  * (Perform Security Operation: Verify Certificate )
  *
  * @param card pointer to card data
@@ -434,7 +430,7 @@ static int cwa_verify_cvc_certificate(sc_card_t * card,
  * Standard set_security_env() method has sc_security_env->buffer limited
  * to 8 bytes; so cannot send some of required SM commands.
  *
- * @param card pointer to card data 
+ * @param card pointer to card data
  * @param p1 apdu P1 parameter
  * @param p2 apdu P2 parameter
  * @param buffer raw data to be inserted in apdu
@@ -472,7 +468,7 @@ static int cwa_set_security_env(sc_card_t * card,
  *
  * Internal (Card) authentication (let the card verify sent ifd certs)
  *
- * @param card pointer to card data 
+ * @param card pointer to card data
  * @param sig signature buffer
  * @param dig_len signature buffer length
  * @param data data to be sent in apdu
@@ -513,7 +509,7 @@ static int cwa_internal_auth(sc_card_t * card, u8 * sig, size_t sig_len, u8 * da
 
 /**
  * Compose signature data for external auth according CWA-14890.
- * 
+ *
  * This code prepares data to be sent to ICC for external
  * authentication procedure
  *
@@ -541,11 +537,11 @@ static int cwa_prepare_external_auth(sc_card_t * card,
 	   PRND2 || - (74 bytes) random data to make buffer 128 bytes length
 	   Kifd  || - (32 bytes)- ifd random generated key
 	   sha1_hash(
-	   PRND2   ||  
-	   Kifd    || 
+	   PRND2   ||
+	   Kifd    ||
 	   RND.ICC || - (8 bytes) response to get_challenge() cmd
 	   SN.ICC  - (8 bytes) serial number from get_serialnr() cmd
-	   ) || 
+	   ) ||
 	   0xBC - iso 9796-2 padding
 	   ) - total: 128 bytes
 
@@ -723,7 +719,7 @@ static int cwa_prepare_external_auth(sc_card_t * card,
  *
  * Perform external (IFD) authenticate procedure (8.4.1.2)
  *
- * @param card pointer to card data 
+ * @param card pointer to card data
  * @param sig signature buffer
  * @param sig signature buffer length
  * @return SC_SUCCESS if OK: else error code
@@ -873,7 +869,7 @@ static int cwa_compare_signature(u8 * data, size_t dlen, u8 * ifd_data)
 	return res;
 }
 
-/** 
+/**
  * check the result of internal_authenticate operation.
  *
  * Checks icc received data from internal auth procedure against
@@ -943,7 +939,7 @@ static int cwa_verify_internal_auth(sc_card_t * card,
 		goto verify_internal_done;
 	}
 
-	/* 
+	/*
 	   We have received data with this format:
 	   sigbuf = E[PK.IFD.AUT](SIGMIN)
 	   SIGMIN = min ( SIG, N.ICC-SIG )
@@ -952,7 +948,7 @@ static int cwa_verify_internal_auth(sc_card_t * card,
 	   PRND1 ||
 	   Kicc  ||
 	   sha1_hash(PRND1 || Kicc || RND.IFD || SN.IFD) ||
-	   0xBC 
+	   0xBC
 	   )
 	   So we should reverse the process and try to get valid results
 	 */
@@ -991,8 +987,8 @@ static int cwa_verify_internal_auth(sc_card_t * card,
 		goto verify_internal_ok;
 
  verify_nicc_sig:
-	/* 
-	 * Arriving here means need to evaluate N.ICC-SIG 
+	/*
+	 * Arriving here means need to evaluate N.ICC-SIG
 	 * So convert buffers to bignums to operate
 	 */
 	bn = BN_bin2bn(buf1, len1, NULL);	/* create BN data */
@@ -1008,7 +1004,7 @@ static int cwa_verify_internal_auth(sc_card_t * card,
 	if (EVP_PKEY_get_bn_param(icc_pubkey, OSSL_PKEY_PARAM_RSA_N, &icc_pubkey_n) != 1) {
 		msg = "Verify Signature: BN get param failed";
 		res = SC_ERROR_INTERNAL;
-		goto verify_internal_ok;
+		goto verify_internal_done;
 	}
 #endif
 	res = BN_sub(sigbn, icc_pubkey_n, bn);	/* eval N.ICC-SIG */
@@ -1166,7 +1162,7 @@ int cwa_create_secure_channel(sc_card_t * card,
 		goto csc_end;
 	}
 
-	/* 
+	/*
 	 * Notice that this code inverts ICC and IFD certificate standard
 	 * checking sequence.
 	 */
@@ -1340,7 +1336,7 @@ int cwa_create_secure_channel(sc_card_t * card,
 		goto csc_end;
 	}
 
-	/* Internal (Card) authentication (let the card verify sent ifd certs) 
+	/* Internal (Card) authentication (let the card verify sent ifd certs)
 	   SN.IFD equals 8 lsb bytes of ifd.pubk ref according cwa14890 sec 8.4.1 */
 	sc_log(ctx, "Step 8.4.1.10: Perform Internal authentication");
 	res = provider->cwa_get_sn_ifd(card);
@@ -1475,6 +1471,7 @@ int cwa_encode_apdu(sc_card_t * card,
 	u8 *cryptbuf = NULL;
 
 	EVP_CIPHER_CTX *cctx = NULL;
+	EVP_CIPHER *alg = NULL;
 	unsigned char *key = NULL;
 	int tmplen = 0;
 
@@ -1565,7 +1562,9 @@ int cwa_encode_apdu(sc_card_t * card,
 		*cryptbuf = 0x01;
 		key = sm_session->session_enc;
 
-		if (EVP_EncryptInit_ex(cctx, EVP_des_ede_cbc(), NULL, key, iv) != 1 ||
+		alg = sc_evp_cipher(card->ctx, "DES-EDE-CBC");
+
+		if (EVP_EncryptInit_ex(cctx, alg, NULL, key, iv) != 1 ||
 			EVP_CIPHER_CTX_set_padding(cctx, 0) != 1 ||
 			EVP_EncryptUpdate(cctx, cryptbuf + 1, &dlen, msgbuf, dlen) != 1 ||
 			EVP_EncryptFinal_ex(cctx, cryptbuf + 1 + dlen, &tmplen) != 1) {
@@ -1618,17 +1617,9 @@ int cwa_encode_apdu(sc_card_t * card,
 	tmplen = 0;
 	key = sm_session->session_mac;
 
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L
-	if (!legacy_provider) {
-		if (!(legacy_provider = OSSL_PROVIDER_try_load(NULL, "legacy", 1))) {
-			msg = "Failed to load legacy provider";
-			res = SC_ERROR_INTERNAL;
-			goto encode_end;
-		}
-	}
-#endif
-
-	if (EVP_EncryptInit_ex(cctx, EVP_des_ecb(), NULL, key, NULL) != 1 ||
+	sc_evp_cipher_free(alg);
+	alg = sc_evp_cipher(card->ctx, "DES-ECB");
+	if (EVP_EncryptInit_ex(cctx, alg, NULL, key, NULL) != 1 ||
 		EVP_CIPHER_CTX_set_padding(cctx, 0) != 1) {
 		msg = "Error in DES ECB encryption";
 		res = SC_ERROR_INTERNAL;
@@ -1653,7 +1644,10 @@ int cwa_encode_apdu(sc_card_t * card,
 	}
 
 	/* and apply 3DES to result */
-	if (EVP_EncryptInit_ex(cctx, EVP_des_ede_ecb(), NULL, key, NULL) != 1 ||
+	sc_evp_cipher_free(alg);
+	alg = sc_evp_cipher(card->ctx, "DES-EDE-ECB");
+
+	if (EVP_EncryptInit_ex(cctx, alg, NULL, key, NULL) != 1 ||
 		EVP_CIPHER_CTX_set_padding(cctx, 0) != 1 ||
 		EVP_EncryptUpdate(cctx, macbuf, &tmplen, macbuf, 8) != 1 ||
 		EVP_EncryptFinal_ex(cctx, macbuf + tmplen, &tmplen) != 1) {
@@ -1687,6 +1681,7 @@ encode_end:
 	if (from->resp != to->resp)
 		free(to->resp);
 encode_end_apdu_valid:
+	sc_evp_cipher_free(alg);
 	if (cctx)
 		EVP_CIPHER_CTX_free(cctx);
 	if (msg)
@@ -1732,6 +1727,7 @@ int cwa_decode_response(sc_card_t * card,
 	struct sm_cwa_session * sm_session = &card->sm_ctx.info.session.cwa;
 
 	EVP_CIPHER_CTX *cctx = NULL;
+	EVP_CIPHER *alg = NULL;
 	unsigned char *key = NULL;
 	int tmplen = 0;
 
@@ -1860,17 +1856,8 @@ int cwa_decode_response(sc_card_t * card,
 	/* set up key for mac computing */
 	key = sm_session->session_mac;
 
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L
-	if (!legacy_provider) {
-		if (!(legacy_provider = OSSL_PROVIDER_try_load(NULL, "legacy", 1))) {
-			msg = "Failed to load legacy provider";
-			res = SC_ERROR_INTERNAL;
-			goto response_decode_end;
-		}
-	}
-#endif
-
-	if (EVP_EncryptInit_ex(cctx, EVP_des_ecb(), NULL, key, NULL) != 1 ||
+	alg = sc_evp_cipher(card->ctx, "DES-ECB");
+	if (EVP_EncryptInit_ex(cctx, alg, NULL, key, NULL) != 1 ||
 		EVP_CIPHER_CTX_set_padding(cctx, 0) != 1) {
 		msg = "Error in DES ECB encryption";
 		res = SC_ERROR_INTERNAL;
@@ -1896,7 +1883,10 @@ int cwa_decode_response(sc_card_t * card,
 	}
 
 	/* finally apply 3DES to result */
-	if (EVP_EncryptInit_ex(cctx, EVP_des_ede_ecb(), NULL, key, NULL) != 1 ||
+	sc_evp_cipher_free(alg);
+	alg = sc_evp_cipher(card->ctx, "DES-EDE-ECB");
+
+	if (EVP_EncryptInit_ex(cctx, alg, NULL, key, NULL) != 1 ||
 		EVP_CIPHER_CTX_set_padding(cctx, 0) != 1 ||
 		EVP_EncryptUpdate(cctx, macbuf, &tmplen, macbuf, 8) != 1 ||
 		EVP_EncryptFinal_ex(cctx, macbuf + tmplen, &tmplen) != 1) {
@@ -1952,7 +1942,10 @@ int cwa_decode_response(sc_card_t * card,
 
 		/* decrypt into response buffer
 		 * by using 3DES CBC by mean of kenc and iv={0,...0} */
-		if (EVP_DecryptInit_ex(cctx, EVP_des_ede_cbc(), NULL, key, iv) != 1 ||
+		sc_evp_cipher_free(alg);
+		alg = sc_evp_cipher(card->ctx, "DES-EDE-CBC");
+
+		if (EVP_DecryptInit_ex(cctx, alg, NULL, key, iv) != 1 ||
 			EVP_CIPHER_CTX_set_padding(cctx, 0) != 1 ||
 			EVP_DecryptUpdate(cctx, apdu->resp, &dlen, &e_tlv->data[1], e_tlv->len - 1) != 1 ||
 			EVP_DecryptFinal_ex(cctx, apdu->resp + dlen, &tmplen) != 1) {
@@ -1981,6 +1974,7 @@ int cwa_decode_response(sc_card_t * card,
 	res = SC_SUCCESS;
 
  response_decode_end:
+	sc_evp_cipher_free(alg);
  	EVP_CIPHER_CTX_free(cctx);
 	if (buffer)
 		free(buffer);

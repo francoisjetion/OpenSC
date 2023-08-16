@@ -19,7 +19,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -50,9 +50,6 @@
 #include "internal.h"
 #include "asn1.h"
 #include "cardctl.h"
-#ifdef ENABLE_ZLIB
-#include "compression.h"
-#endif
 #include "simpletlv.h"
 
 enum {
@@ -131,6 +128,7 @@ enum {
  */
 
 #define PIV_OBJ_CACHE_VALID			1
+#define PIV_OBJ_CACHE_COMPRESSED	2
 #define PIV_OBJ_CACHE_NOT_PRESENT	8
 
 typedef struct piv_obj_cache {
@@ -239,25 +237,67 @@ static const struct sc_atr_table piv_atrs[] = {
 	{ "3B:D8:18:00:80:B1:FE:45:1F:07:80:31:C1:64:08:06:92:0F:D5", NULL, NULL, SC_CARD_TYPE_PIV_II_OBERTHUR, 0, NULL },
 	{ "3b:86:80:01:80:31:c1:52:41:1a:7e", NULL, NULL, SC_CARD_TYPE_PIV_II_OBERTHUR, 0, NULL }, /* contactless */
 
-
-	/* PIVKEY from Taligo */
-	/* PIVKEY T600 token and T800  on Feitian eJAVA */
-	{ "3B:FC:18:00:00:81:31:80:45:90:67:46:4A:00:64:2D:70:C1:72:FE:E0:FE", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
-
-	/* PIVKEY C910 */
+	/* Following PIVKEY entries are from Windows registry provided by gw@taglio.com 2022-09-05 */
+	/* PIVKEY PIVKey Feitian (02) */
+	{ "3b:9f:95:81:31:fe:9f:00:66:46:53:05:10:00:11:71:df:00:00:00:00:00:02", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/* PIVKey Feitian (7C)  aka C910 contactless */
+	{ "3b:8c:80:01:90:67:46:4a:00:64:16:06:f2:72:7e:00:7c", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/*PIVKey Feitian (E0)  aka C910 */
 	{ "3b:fc:18:00:00:81:31:80:45:90:67:46:4a:00:64:16:06:f2:72:7e:00:e0", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
-	{ "3b:8c:80:01:90:67:46:4a:00:64:16:06:f2:72:7e:00:7c", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL }, /* contactless */
-
-
-	/* PIVKEY C980 */
-	{ "3B:f9:96:00:00:81:31:fe:45:53:50:49:56:4b:45:59:37:30:28", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
-	{ "3b:89:80:01:53:50:49:56:4b:45:59:37:30:44", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL }, /* contactless */
+	/* PIVKey Feitian (FE)  aka PIVKEY T600 token and T800  on Feitian eJAVA */
+	{ "3b:fc:18:00:00:81:31:80:45:90:67:46:4a:00:64:2d:70:c1:72:fe:e0:fe", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/* PIVKey JCOP241 (AD) */
+	{ "3b:f9:13:00:00:81:31:fe:45:53:50:49:56:4b:45:59:37:30:ad", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/* PIVKey JCOP242R2 (16) */
+	{ "3b:88:80:01:50:49:56:4b:45:59:37:30:16", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/* PIVKey JCOP242R2 (5E) */
+	{ "3b:88:80:01:4a:43:4f:50:76:32:34:31:5e", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/* PIVKey JCOP242R2 (B7) */
+	{ "3b:f8:13:00:00:81:31:fe:45:4a:43:4f:50:76:32:34:31:b7", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/* PIVKey JCOP3 (67) */
+	{ "3b:88:80:01:46:49:44:45:53:4d:4f:31:67", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/* PIVKey JCOP3 (8E) */
+	{ "3b:f8:13:00:00:81:31:fe:45:46:49:44:45:53:4d:4f:31:8e", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/* PIVKey JCOP31 (57) */
+	{ "3b:f9:18:00:ff:81:31:fe:45:4a:43:4f:50:33:31:56:32:32:57", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/* PIVKey NXP JCOP (03) */
+	{ "3b:8a:80:01:01:50:49:56:4b:45:59:37:30:16:03", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/* PIVKey NXP JCOP (FF)  aka CP70 */
+	{ "3b:f8:13:00:00:81:31:fe:45:50:49:56:4b:45:59:37:30:ff", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/* PIVKey SLE78 (3B) */
+	{ "3b:8d:80:01:53:4c:4a:35:32:47:44:4c:31:32:38:43:52:3b", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/* PIVKey SLE78 (6D) */
+	{ "3b:88:80:01:00:00:00:11:77:81:83:00:6d", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/* PIVKey SLE78 (28) aka C980 */
+	{ "3b:f9:96:00:00:81:31:fe:45:53:50:49:56:4b:45:59:37:30:28", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/* PIVKey SLE78 (44) aka C980 contactless */
+	{ "3b:89:80:01:53:50:49:56:4b:45:59:37:30:44", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/* PIVKey SLE78 (57B) */
+	{ "3b:fd:96:00:00:81:31:fe:45:53:4c:4a:35:32:47:44:4c:31:32:38:43:52:57", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/* PIVKey uTrust (01) ISO 14443 Type B without historical bytes */
+	{ "3b:80:80:01:01", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/* PIVKey uTrust (73) */
+	{ "3b:96:11:81:21:75:75:54:72:75:73:74:73", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
+	/* PIVKey uTrust FIDO2 (73) */
+	{ "3b:96:11:81:21:75:75:54:72:75:73:74:73", NULL, NULL, SC_CARD_TYPE_PIV_II_PIVKEY, 0, NULL },
 
 	/* ID-One PIV 2.4.1 on Cosmo V8.1 */
 	{ "3b:d6:96:00:81:b1:fe:45:1f:87:80:31:c1:52:41:1a:2a", NULL, NULL, SC_CARD_TYPE_PIV_II_OBERTHUR, 0, NULL },
 	{ "3b:86:80:01:80:31:c1:52:41:12:76", NULL, NULL, SC_CARD_TYPE_PIV_II_OBERTHUR, 0, NULL }, /* contactless */
 
+	/* Swissbit iShield Key Pro with PIV endpoint applet */
+	{ "3b:97:11:81:21:75:69:53:68:69:65:6c:64:05", NULL, NULL, SC_CARD_TYPE_PIV_II_SWISSBIT, 0, NULL },
+
 	{ NULL, NULL, NULL, 0, 0, NULL }
+};
+
+static struct piv_supported_ec_curves {
+	struct sc_object_id oid;
+	size_t size;
+} ec_curves[] = {
+	{{{1, 2, 840, 10045, 3, 1, 7, -1}},     256}, /* secp256r1, nistp256, prime256v1, ansiX9p256r1 */
+	{{{1, 3, 132, 0, 34, -1}},              384}, /* secp384r1, nistp384, prime384v1, ansiX9p384r1 */
+	{{{-1}}, 0} /* This entry must not be touched. */
 };
 
 /* all have same AID */
@@ -557,14 +597,15 @@ static int piv_generate_key(sc_card_t *card,
 	const u8 *tag;
 	u8 tagbuf[16];
 	u8 outdata[3]; /* we could also add tag 81 for exponent */
-	size_t taglen, i;
+	size_t taglen;
 	size_t out_len;
 	size_t in_len;
 	unsigned int cla_out, tag_out;
 
 	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
 
-	keydata->exponent = 0;
+	keydata->exponent = NULL;
+	keydata->exponent_len = 0;
 	keydata->pubkey = NULL;
 	keydata->pubkey_len = 0;
 	keydata->ecparam = NULL; /* will show size as we only support 2 curves */
@@ -606,7 +647,6 @@ static int piv_generate_key(sc_card_t *card,
 
 	if (r >= 0) {
 		const u8 *cp;
-		keydata->exponent = 0;
 
 		cp = rbuf;
 		in_len = r;
@@ -625,16 +665,20 @@ static int piv_generate_key(sc_card_t *card,
 		if (keydata->key_bits > 0 ) {
 			tag = sc_asn1_find_tag(card->ctx, cp, in_len, 0x82, &taglen);
 			if (tag != NULL && taglen <= 4) {
-				keydata->exponent = 0;
-				for (i = 0; i < taglen;i++)
-					keydata->exponent = (keydata->exponent<<8) + tag[i];
+				keydata->exponent = malloc(taglen);
+				if (keydata->exponent == NULL)
+					LOG_FUNC_RETURN(card->ctx, SC_ERROR_OUT_OF_MEMORY);
+				keydata->exponent_len = taglen;
+				memcpy (keydata->exponent, tag, taglen);
 			}
 
 			tag = sc_asn1_find_tag(card->ctx, cp, in_len, 0x81, &taglen);
 			if (tag != NULL && taglen > 0) {
 				keydata->pubkey = malloc(taglen);
-				if (keydata->pubkey == NULL)
+				if (keydata->pubkey == NULL) {
+					free(keydata->exponent);
 					LOG_FUNC_RETURN(card->ctx, SC_ERROR_OUT_OF_MEMORY);
+				}
 				keydata->pubkey_len = taglen;
 				memcpy (keydata->pubkey, tag, taglen);
 			}
@@ -1050,27 +1094,14 @@ piv_cache_internal_data(sc_card_t *card, int enumtag)
 			LOG_FUNC_RETURN(card->ctx, SC_ERROR_FILE_NOT_FOUND);
 
 		if(compressed) {
-#ifdef ENABLE_ZLIB
-			size_t len;
-			u8* newBuf = NULL;
-
-			if(SC_SUCCESS != sc_decompress_alloc(&newBuf, &len, tag, taglen, COMPRESSION_AUTO))
-				LOG_FUNC_RETURN(card->ctx, SC_ERROR_OBJECT_NOT_VALID);
-
-			priv->obj_cache[enumtag].internal_obj_data = newBuf;
-			priv->obj_cache[enumtag].internal_obj_len = len;
-#else
-			sc_log(card->ctx, "PIV compression not supported, no zlib");
-			LOG_FUNC_RETURN(card->ctx, SC_ERROR_NOT_SUPPORTED);
-#endif
+			priv->obj_cache[enumtag].flags |= PIV_OBJ_CACHE_COMPRESSED;
 		}
-		else {
-			if (!(priv->obj_cache[enumtag].internal_obj_data = malloc(taglen)))
-				LOG_FUNC_RETURN(card->ctx, SC_ERROR_OUT_OF_MEMORY);
+		/* internal certificate remains compressed */
+		if (!(priv->obj_cache[enumtag].internal_obj_data = malloc(taglen)))
+			LOG_FUNC_RETURN(card->ctx, SC_ERROR_OUT_OF_MEMORY);
 
-			memcpy(priv->obj_cache[enumtag].internal_obj_data, tag, taglen);
-			priv->obj_cache[enumtag].internal_obj_len = taglen;
-		}
+		memcpy(priv->obj_cache[enumtag].internal_obj_data, tag, taglen);
+		priv->obj_cache[enumtag].internal_obj_len = taglen;
 
 	/* convert pub key to internal */
 /* TODO: -DEE need to fix ...  would only be used if we cache the pub key, but we don't today */
@@ -1108,7 +1139,7 @@ piv_cache_internal_data(sc_card_t *card, int enumtag)
  * as well as set that we want the cert from the object.
  */
 static int
-piv_read_binary(sc_card_t *card, unsigned int idx, unsigned char *buf, size_t count, unsigned long flags)
+piv_read_binary(sc_card_t *card, unsigned int idx, unsigned char *buf, size_t count, unsigned long *flags)
 {
 	piv_private_data_t * priv = PIV_DATA(card);
 	int enumtag;
@@ -1162,6 +1193,9 @@ piv_read_binary(sc_card_t *card, unsigned int idx, unsigned char *buf, size_t co
 	if (priv->return_only_cert || piv_objects[enumtag].flags & PIV_OBJECT_TYPE_PUBKEY) {
 		rbuf = priv->obj_cache[enumtag].internal_obj_data;
 		rbuflen = priv->obj_cache[enumtag].internal_obj_len;
+		if ((priv->obj_cache[enumtag].flags & PIV_OBJ_CACHE_COMPRESSED) && flags) {
+			*flags |= SC_FILE_FLAG_COMPRESSED_AUTO;
+		}
 	} else {
 		rbuf = priv->obj_cache[enumtag].obj_data;
 		rbuflen = priv->obj_cache[enumtag].obj_len;
@@ -1389,17 +1423,27 @@ static int piv_write_binary(sc_card_t *card, unsigned int idx,
  */
 
 #ifdef ENABLE_OPENSSL
-static const EVP_CIPHER *get_cipher_for_algo(int alg_id)
+static EVP_CIPHER *get_cipher_for_algo(sc_card_t *card, int alg_id)
 {
+	const char *algo;
 	switch (alg_id) {
-		case 0x0: return EVP_des_ede3_ecb();
-		case 0x1: return EVP_des_ede3_ecb(); /* 2TDES */
-		case 0x3: return EVP_des_ede3_ecb();
-		case 0x8: return EVP_aes_128_ecb();
-		case 0xA: return EVP_aes_192_ecb();
-		case 0xC: return EVP_aes_256_ecb();
+		case 0x0:
+		case 0x1: /* 2TDES */
+		case 0x3:
+			algo = "DES-EDE3-ECB";
+			break;
+		case 0x8:
+			algo = "AES-128-ECB";
+			break;
+		case 0xA:
+			algo = "AES-192-ECB";
+			break;
+		case 0xC:
+			algo = "AES-256-ECB";
+			break;
 		default: return NULL;
 	}
+	return sc_evp_cipher(card->ctx, algo);
 }
 
 static int get_keylen(unsigned int alg_id, size_t *size)
@@ -1565,7 +1609,7 @@ static int piv_general_mutual_authenticate(sc_card_t *card,
 	EVP_CIPHER_CTX * ctx = NULL;
 
 	u8 sbuf[255];
-	const EVP_CIPHER *cipher;
+	EVP_CIPHER *cipher = NULL;
 
 	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
 
@@ -1575,7 +1619,7 @@ static int piv_general_mutual_authenticate(sc_card_t *card,
 		goto err;
 	}
 
-	cipher = get_cipher_for_algo(alg_id);
+	cipher = get_cipher_for_algo(card, alg_id);
 	if(!cipher) {
 		sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "Invalid cipher selector, none found for:  %02x\n", alg_id);
 		r = SC_ERROR_INVALID_ARGUMENTS;
@@ -1778,7 +1822,7 @@ static int piv_general_mutual_authenticate(sc_card_t *card,
 		goto err;
 	}
 
-	EVP_CIPHER_CTX_cleanup(ctx);
+	EVP_CIPHER_CTX_reset(ctx);
 
 	if (!EVP_DecryptInit(ctx, cipher, key, NULL)) {
 		r = SC_ERROR_INTERNAL;
@@ -1811,6 +1855,7 @@ static int piv_general_mutual_authenticate(sc_card_t *card,
 	r = SC_SUCCESS;
 
 err:
+	sc_evp_cipher_free(cipher);
 	if (ctx)
 		EVP_CIPHER_CTX_free(ctx);
 	if (locked)
@@ -1858,7 +1903,7 @@ static int piv_general_external_authenticate(sc_card_t *card,
 	size_t cypher_text_len = 0;
 	u8 sbuf[255];
 	EVP_CIPHER_CTX * ctx = NULL;
-	const EVP_CIPHER *cipher;
+	EVP_CIPHER *cipher = NULL;
 
 	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
 
@@ -1870,7 +1915,7 @@ static int piv_general_external_authenticate(sc_card_t *card,
 
 	sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "Selected cipher for algorithm id: %02x\n", alg_id);
 
-	cipher = get_cipher_for_algo(alg_id);
+	cipher = get_cipher_for_algo(card, alg_id);
 	if(!cipher) {
 		sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "Invalid cipher selector, none found for:  %02x\n", alg_id);
 		r = SC_ERROR_INVALID_ARGUMENTS;
@@ -2008,8 +2053,7 @@ static int piv_general_external_authenticate(sc_card_t *card,
 	}
 
 	/* Sanity check the lengths again */
-	tmplen = sc_asn1_put_tag(0x7C, NULL, tmplen, NULL, 0, NULL)
-		+ sc_asn1_put_tag(0x82, NULL, cypher_text_len, NULL, 0, NULL);
+	tmplen = sc_asn1_put_tag(0x7C, NULL, tmplen, NULL, 0, NULL);
 	if (output_len != (size_t)tmplen) {
 		sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "Allocated and computed lengths do not match! "
 			 "Expected %"SC_FORMAT_LEN_SIZE_T"d, found: %d\n", output_len, tmplen);
@@ -2021,6 +2065,7 @@ static int piv_general_external_authenticate(sc_card_t *card,
 	sc_debug(card->ctx, SC_LOG_DEBUG_VERBOSE, "Got response  challenge\n");
 
 err:
+	sc_evp_cipher_free(cipher);
 	if (ctx)
 		EVP_CIPHER_CTX_free(ctx);
 
@@ -2144,11 +2189,11 @@ static int piv_is_object_present(sc_card_t *card, u8 *ptr)
  * or the global pin for the card 0x00. Look at Discovery object to get this.
  * called by pkcs15-piv.c  via cardctl when setting up the pins.
  */
-static int piv_get_pin_preference(sc_card_t *card, int *ptr)
+static int piv_get_pin_preference(sc_card_t *card, int *pin_ref)
 {
 	piv_private_data_t * priv = PIV_DATA(card);
 
-	*ptr = priv->pin_preference;
+	*pin_ref = priv->pin_preference;
 	LOG_FUNC_RETURN(card->ctx, SC_SUCCESS);
 }
 
@@ -2397,14 +2442,8 @@ piv_compute_signature(sc_card_t *card, const u8 * data, size_t datalen,
 {
 	piv_private_data_t * priv = PIV_DATA(card);
 	int r;
-	int i;
 	size_t nLen;
 	u8 rbuf[128]; /* For EC conversions  384 will fit */
-	const unsigned char *pseq, *pint, *ptemp, *pend;
-	unsigned int cla, tag;
-	size_t seqlen;
-	size_t intlen;
-	size_t templen;
 
 	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
 
@@ -2424,40 +2463,12 @@ piv_compute_signature(sc_card_t *card, const u8 * data, size_t datalen,
 			r = SC_ERROR_INVALID_DATA;
 			goto err;
 		}
-		memset(out, 0, outlen);
 
 		r = piv_validate_general_authentication(card, data, datalen, rbuf, sizeof rbuf);
 		if (r < 0)
 			goto err;
-
-		pseq = rbuf;
-		r = sc_asn1_read_tag(&pseq, r, &cla, &tag, &seqlen);
-		if (pseq == NULL || r < 0 || seqlen == 0 || (cla|tag) != 0x30)
-			LOG_TEST_GOTO_ERR(card->ctx, SC_ERROR_INVALID_DATA, "Can't find 0x30");
-
-		pint = pseq;
-		pend = pseq + seqlen;
-		for (i = 0; i < 2; i++) {
-			r = sc_asn1_read_tag(&pint, (pend - pint), &cla, &tag, &intlen);
-			if (pint == NULL || r < 0 || intlen == 0 || (cla|tag) != 0x02)
-				LOG_TEST_GOTO_ERR(card->ctx, SC_ERROR_INVALID_DATA, "Can't find 0x02");
-			if (intlen > nLen + 1)
-				LOG_TEST_GOTO_ERR(card->ctx, SC_ERROR_INVALID_DATA,"Signature too long");
-
-			ptemp = pint;
-			templen = intlen;
-			if (intlen > nLen) { /* drop leading 00 if present */
-				if (*ptemp != 0x00) {
-					LOG_TEST_GOTO_ERR(card->ctx, SC_ERROR_INVALID_DATA,"Signature too long");
-				}
-				ptemp++;
-				templen--;
-			}
-			memcpy(out + nLen*i + nLen - templen, ptemp, templen);
-			pint += intlen; /* next integer */
-			
-		}
-		r = 2 * nLen;
+		
+		r = sc_asn1_decode_ecdsa_signature(card->ctx, rbuf, r, nLen, &out, outlen);
 	} else { /* RSA is all set */
 		r = piv_validate_general_authentication(card, data, datalen, out, outlen);
 	}
@@ -3006,6 +3017,11 @@ piv_finish(sc_card_t *card)
 
 	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
 	if (priv) {
+		if (priv->context_specific) {
+			sc_log(card->ctx, "Clearing CONTEXT_SPECIFIC lock");
+			priv->context_specific = 0;
+			sc_unlock(card);
+		}
 		if (priv->w_buf)
 			free(priv->w_buf);
 		if (priv->offCardCertURL)
@@ -3042,6 +3058,7 @@ static int piv_match_card(sc_card_t *card)
 		case SC_CARD_TYPE_PIV_II_OBERTHUR_DUAL_CAC:
 		case SC_CARD_TYPE_PIV_II_OBERTHUR:
 		case SC_CARD_TYPE_PIV_II_PIVKEY:
+		case SC_CARD_TYPE_PIV_II_SWISSBIT:
 			break;
 		default:
 			return 0; /* can not handle the card */
@@ -3072,10 +3089,6 @@ static int piv_match_card_continued(sc_card_t *card)
 	piv_private_data_t *priv = NULL;
 	int saved_type = card->type;
 
-	/* Since we send an APDU, the card's logout function may be called...
-	 * however it may be in dirty memory */
-	card->ops->logout = NULL;
-
 	/* piv_match_card may be called with card->type, set by opensc.conf */
 	/* user provide card type must be one we know */
 	switch (card->type) {
@@ -3091,6 +3104,7 @@ static int piv_match_card_continued(sc_card_t *card)
 		case SC_CARD_TYPE_PIV_II_OBERTHUR_DUAL_CAC:
 		case SC_CARD_TYPE_PIV_II_OBERTHUR:
 		case SC_CARD_TYPE_PIV_II_PIVKEY:
+		case SC_CARD_TYPE_PIV_II_SWISSBIT:
 			type = card->type;
 			break;
 		default:
@@ -3173,7 +3187,6 @@ static int piv_match_card_continued(sc_card_t *card)
 	priv->pin_preference = 0x80; /* 800-73-3 part 1, table 3 */
 	/* TODO Dual CAC/PIV are bases on 800-73-1 where priv->pin_preference = 0. need to check later */
 	priv->logged_in = SC_PIN_STATE_UNKNOWN;
-	priv->tries_left = 10; /* will assume OK at start */
 	priv->pstate = PIV_STATE_MATCH;
 
 	/* Some objects will only be present if History object says so */
@@ -3230,6 +3243,7 @@ static int piv_match_card_continued(sc_card_t *card)
 			case SC_CARD_TYPE_PIV_II_GI_DE:
 			case SC_CARD_TYPE_PIV_II_GEMALTO:
 			case SC_CARD_TYPE_PIV_II_OBERTHUR:
+			case SC_CARD_TYPE_PIV_II_SWISSBIT:
 				iccc = piv_process_ccc(card);
 				sc_debug(card->ctx,SC_LOG_DEBUG_MATCH, "PIV_MATCH card->type:%d iccc:%d ccc_flags:%08x CI:%08x r:%d\n",
 						card->type, iccc, priv->ccc_flags, priv->card_issues, r);
@@ -3394,6 +3408,7 @@ static int piv_init(sc_card_t *card)
 		case SC_CARD_TYPE_PIV_II_GI_DE:
 		case SC_CARD_TYPE_PIV_II_OBERTHUR:
 		case SC_CARD_TYPE_PIV_II_GEMALTO:
+		case SC_CARD_TYPE_PIV_II_SWISSBIT:
 			priv->card_issues |= 0; /* could add others here */
 			break;
 
@@ -3445,19 +3460,25 @@ static int piv_init(sc_card_t *card)
 	 * piv-tool can still do this, just don't tell PKCS#11
 	 */
 
-	 flags = SC_ALGORITHM_RSA_RAW;
+	flags = SC_ALGORITHM_RSA_RAW;
+
+	if (card->type == SC_CARD_TYPE_PIV_II_SWISSBIT) {
+		flags |= SC_ALGORITHM_ONBOARD_KEY_GEN;
+	}
 
 	_sc_card_add_rsa_alg(card, 1024, flags, 0); /* mandatory */
 	_sc_card_add_rsa_alg(card, 2048, flags, 0); /* optional */
 	_sc_card_add_rsa_alg(card, 3072, flags, 0); /* optional */
 
 	if (!(priv->card_issues & CI_NO_EC)) {
+		int i;
 		flags = SC_ALGORITHM_ECDSA_RAW | SC_ALGORITHM_ECDH_CDH_RAW | SC_ALGORITHM_ECDSA_HASH_NONE;
 		ext_flags = SC_ALGORITHM_EXT_EC_NAMEDCURVE | SC_ALGORITHM_EXT_EC_UNCOMPRESES;
 
-		_sc_card_add_ec_alg(card, 256, flags, ext_flags, NULL);
-		if (!(priv->card_issues & CI_NO_EC384))
-			_sc_card_add_ec_alg(card, 384, flags, ext_flags, NULL);
+		for (i = 0; ec_curves[i].oid.value[0] >= 0; i++) {
+			if (!(priv->card_issues & CI_NO_EC384 && ec_curves[i].size == 384))
+				_sc_card_add_ec_alg(card, ec_curves[i].size, flags, ext_flags, &ec_curves[i].oid);
+		}
 	}
 
 	if (!(priv->card_issues & CI_NO_RANDOM))
@@ -3735,12 +3756,18 @@ piv_pin_cmd(sc_card_t *card, struct sc_pin_cmd_data *data, int *tries_left)
 
 static int piv_logout(sc_card_t *card)
 {
-	int r = SC_ERROR_NOT_SUPPORTED; /* TODO Some PIV cards may support a logout */
-	/* piv_private_data_t * priv = PIV_DATA(card); */
+	int r = SC_ERROR_NOT_SUPPORTED;
+	piv_private_data_t * priv = PIV_DATA(card);
 
 	LOG_FUNC_CALLED(card->ctx);
 
-	/* TODO 800-73-3 does not define a logout, 800-73-4 does */
+	if (priv) {
+		/* logout defined since 800-73-4 */
+		r = iso7816_logout(card, priv->pin_preference);
+		if (r == SC_SUCCESS) {
+			priv->logged_in = SC_PIN_STATE_LOGGED_OUT;
+		}
+	}
 
 	LOG_FUNC_RETURN(card->ctx, r);
 }

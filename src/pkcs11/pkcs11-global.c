@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include "config.h"
@@ -37,7 +37,10 @@
 #include "sc-pkcs11.h"
 #include "ui/notify.h"
 
+#ifdef ENABLE_OPENSSL
+#include <openssl/crypto.h>
 #include "libopensc/sc-ossl-compat.h"
+#endif
 #ifdef ENABLE_OPENPACE
 #include <eac/eac.h>
 #endif
@@ -56,6 +59,7 @@ pid_t initialized_pid = (pid_t)-1;
 static int in_finalize = 0;
 extern CK_FUNCTION_LIST pkcs11_function_list;
 extern CK_FUNCTION_LIST_3_0 pkcs11_function_list_3_0;
+int nesting = 0;
 
 #ifdef PKCS11_THREAD_LOCKING
 
@@ -248,7 +252,7 @@ __attribute__((destructor))
 int module_close()
 {
 	sc_notify_close();
-#if defined(ENABLE_OPENSSL) && defined(OPENSSL_SECURE_MALLOC_SIZE)
+#if defined(ENABLE_OPENSSL) && defined(OPENSSL_SECURE_MALLOC_SIZE) && !defined(LIBRESSL_VERSION_NUMBER)
 	CRYPTO_secure_malloc_done();
 #endif
 #ifdef ENABLE_OPENPACE
@@ -287,27 +291,47 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
 {
 	CK_RV rv;
 #if !defined(_WIN32)
-	pid_t current_pid = getpid();
+	pid_t current_pid;
 #endif
 	int rc;
 	sc_context_param_t ctx_opts;
 
 #if !defined(_WIN32)
 	/* Handle fork() exception */
+	C_INITIALIZE_M_LOCK
+	current_pid = getpid();
 	if (current_pid != initialized_pid) {
-		if (context)
+		if (context && CKR_OK == sc_pkcs11_lock()) {
 			context->flags |= SC_CTX_FLAG_TERMINATE;
+			sc_pkcs11_unlock();
+		}
 		C_Finalize(NULL_PTR);
 	}
 	initialized_pid = current_pid;
 	in_finalize = 0;
+	C_INITIALIZE_M_UNLOCK
 #endif
+
+	/* protect from nesting */
+	C_INITIALIZE_M_LOCK
+	nesting++;
+	if (nesting > 1) {
+		nesting--;
+		C_INITIALIZE_M_UNLOCK
+		return CKR_GENERAL_ERROR;
+	}
+	C_INITIALIZE_M_UNLOCK
+	/* protect from nesting */
 
 	/* protect from multiple threads tryng to setup locking */
 	C_INITIALIZE_M_LOCK
 
 	if (context != NULL) {
-		sc_log(context, "C_Initialize(): Cryptoki already initialized\n");
+		if (CKR_OK == sc_pkcs11_lock()) {
+			sc_log(context, "C_Initialize(): Cryptoki already initialized\n");
+			sc_pkcs11_unlock();
+		}
+		nesting--;
 		C_INITIALIZE_M_UNLOCK
 		return CKR_CRYPTOKI_ALREADY_INITIALIZED;
 	}
@@ -361,6 +385,7 @@ out:
 	}
 
 	/* protect from multiple threads tryng to setup locking */
+	nesting--;
 	C_INITIALIZE_M_UNLOCK
 
 	return rv;
@@ -641,7 +666,7 @@ CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
 		memcpy(pInfo, &slot->slot_info, sizeof(CK_SLOT_INFO));
 
 	sc_log(context, "C_GetSlotInfo() flags 0x%lX", pInfo->flags);
-	
+
 	name = lookup_enum(RV_T, rv);
 	if (name)
 		sc_log(context, "C_GetSlotInfo(0x%lx) = %s", slotID, name);

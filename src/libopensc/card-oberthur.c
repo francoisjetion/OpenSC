@@ -18,7 +18,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  *
  * best view with tabstop=4
  */
@@ -534,6 +534,11 @@ auth_select_file(struct sc_card *card, const struct sc_path *in_path,
 				memcpy(&tmp_path, &auth_current_df->path,  sizeof(struct sc_path));
 				tmp_path.type = SC_PATH_TYPE_PARENT;
 
+				if (file_out) {
+					sc_file_free(*file_out);
+					*file_out = NULL;
+				}
+
 				rv = auth_select_file (card, &tmp_path, file_out);
 				LOG_TEST_RET(card->ctx, rv, "select file failed");
 			}
@@ -549,17 +554,25 @@ auth_select_file(struct sc_card *card, const struct sc_path *in_path,
 			for (ii=0; ii < path.len - offs; ii+=2)   {
 				memcpy(tmp_path.value, path.value + offs + ii, 2);
 
+				if (file_out) {
+					sc_file_free(*file_out);
+					*file_out = NULL;
+				}
+
 				rv = auth_select_file(card, &tmp_path, file_out);
 				LOG_TEST_RET(card->ctx, rv, "select file failed");
 			}
 		}
 		else if (path.len - offs == 0 && file_out)  {
-			if (sc_compare_path(&path, &auth_current_df->path))
+			if (sc_compare_path(&path, &auth_current_df->path) && file_out) {
+				sc_file_free(*file_out);
 				sc_file_dup(file_out, auth_current_df);
-			else  if (auth_current_ef)
+			} else  if (auth_current_ef && file_out) {
+				sc_file_free(*file_out);
 				sc_file_dup(file_out, auth_current_ef);
-			else
+			} else {
 				LOG_TEST_RET(card->ctx, SC_ERROR_INTERNAL, "No current EF");
+			}
 		}
 	}
 
@@ -1336,6 +1349,7 @@ auth_update_component(struct sc_card *card, struct auth_update_component_info *a
 		const unsigned char in[8] = {0,0,0,0,0,0,0,0};
 		unsigned char out[8];
 		EVP_CIPHER_CTX  * ctx = NULL;
+		EVP_CIPHER *alg = NULL;
 
 		if (args->len!=8 && args->len!=24)
 			LOG_FUNC_RETURN(card->ctx, SC_ERROR_INVALID_ARGUMENTS);
@@ -1346,11 +1360,13 @@ auth_update_component(struct sc_card *card, struct auth_update_component_info *a
 
 		p2 = 0;
 		if (args->len == 24)
-			EVP_EncryptInit_ex(ctx, EVP_des_ede(), NULL, args->data, NULL);
+			alg = sc_evp_cipher(card->ctx, "DES-EDE");
 		else
-			EVP_EncryptInit_ex(ctx, EVP_des_ecb(), NULL, args->data, NULL);
+			alg = sc_evp_cipher(card->ctx, "DES-ECB");
+		EVP_EncryptInit_ex(ctx, alg, NULL, args->data, NULL);
 		rv = EVP_EncryptUpdate(ctx, out, &outl, in, 8);
 		EVP_CIPHER_CTX_free(ctx);
+		sc_evp_cipher_free(alg);
 		if (rv == 0) {
 			sc_log(card->ctx, "OpenSSL encryption error.");
 			LOG_FUNC_RETURN(card->ctx, SC_ERROR_INTERNAL);
@@ -1802,8 +1818,11 @@ auth_pin_reset_oberthur_style(struct sc_card *card, unsigned int type,
 	rv = iso_ops->select_file(card, &tmp_path, &tmp_file);
 	LOG_TEST_RET(card->ctx, rv, "select PUK file");
 
-	if (!tmp_file || tmp_file->size < OBERTHUR_AUTH_MAX_LENGTH_PUK)
+	if (!tmp_file || tmp_file->size < OBERTHUR_AUTH_MAX_LENGTH_PUK) {
+		sc_file_free(tmp_file);
 		LOG_TEST_RET(card->ctx, SC_ERROR_FILE_TOO_SMALL, "Oberthur style 'PIN RESET' failed");
+	}
+	sc_file_free(tmp_file);
 
 	rv = iso_ops->read_binary(card, 0, puk, OBERTHUR_AUTH_MAX_LENGTH_PUK, 0);
 	LOG_TEST_RET(card->ctx, rv, "read PUK file error");
@@ -2104,7 +2123,7 @@ auth_update_binary(struct sc_card *card, unsigned int offset,
 
 static int
 auth_read_binary(struct sc_card *card, unsigned int offset,
-		unsigned char *buf, size_t count, unsigned long flags)
+		unsigned char *buf, size_t count, unsigned long *flags)
 {
 	int rv;
 	struct sc_pkcs15_bignum bn[2];
@@ -2119,7 +2138,7 @@ auth_read_binary(struct sc_card *card, unsigned int offset,
 
 	sc_log(card->ctx,
 	       "offset %i; size %"SC_FORMAT_LEN_SIZE_T"u; flags 0x%lX",
-	       offset, count, flags);
+	       offset, count, flags ? *flags : 0);
 	sc_log(card->ctx,"last selected : magic %X; ef %X",
 			auth_current_ef->magic, auth_current_ef->ef_structure);
 
@@ -2195,7 +2214,7 @@ err:
 
 
 static int
-auth_read_record(struct sc_card *card, unsigned int nr_rec,
+auth_read_record(struct sc_card *card, unsigned int nr_rec, unsigned int idx,
 		unsigned char *buf, size_t count, unsigned long flags)
 {
 	struct sc_apdu apdu;
@@ -2206,7 +2225,7 @@ auth_read_record(struct sc_card *card, unsigned int nr_rec,
 	       "auth_read_record(): nr_rec %i; count %"SC_FORMAT_LEN_SIZE_T"u",
 	       nr_rec, count);
 
-	if (nr_rec > 0xFF)
+	if (nr_rec > 0xFF || idx != 0)
 		LOG_FUNC_RETURN(card->ctx, SC_ERROR_INVALID_ARGUMENTS);
 
 	sc_format_apdu(card, &apdu, SC_APDU_CASE_2_SHORT, 0xB2, nr_rec, 0);

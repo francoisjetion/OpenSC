@@ -23,7 +23,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #if HAVE_CONFIG_H
@@ -49,9 +49,6 @@
 #include "internal.h"
 #include "simpletlv.h"
 #include "cardctl.h"
-#ifdef ENABLE_ZLIB
-#include "compression.h"
-#endif
 #include "iso7816.h"
 #include "card-cac-common.h"
 #include "pkcs15.h"
@@ -125,7 +122,7 @@ static int cac_cac1_get_certificate(sc_card_t *card, u8 **out_buf, size_t *out_l
  * as well as set that we want the cert from the object.
  */
 static int cac_read_binary(sc_card_t *card, unsigned int idx,
-		unsigned char *buf, size_t count, unsigned long flags)
+		unsigned char *buf, size_t count, unsigned long *flags)
 {
 	cac_private_data_t * priv = CAC_DATA(card);
 	int r = 0;
@@ -171,16 +168,9 @@ static int cac_read_binary(sc_card_t *card, unsigned int idx,
 
 	/* if the info byte is 1, then the cert is compressed, decompress it */
 	if ((cert_type & 0x3) == 1) {
-#ifdef ENABLE_ZLIB
-		r = sc_decompress_alloc(&priv->cache_buf, &priv->cache_buf_len,
-			cert_ptr, cert_len, COMPRESSION_AUTO);
-#else
-		sc_log(card->ctx, "CAC compression not supported, no zlib");
-		r = SC_ERROR_NOT_SUPPORTED;
-#endif
-		if (r)
-			goto done;
-	} else if (cert_len > 0) {
+		*flags |= SC_FILE_FLAG_COMPRESSED_AUTO;
+	}
+	if (cert_len > 0) {
 		priv->cache_buf = malloc(cert_len);
 		if (priv->cache_buf == NULL) {
 			r = SC_ERROR_OUT_OF_MEMORY;
@@ -498,9 +488,6 @@ static int cac_match_card(sc_card_t *card)
 {
 	int r;
 	SC_FUNC_CALLED(card->ctx, SC_LOG_DEBUG_VERBOSE);
-	/* Since we send an APDU, the card's logout function may be called...
-	 * however it may be in dirty memory */
-	card->ops->logout = NULL;
 
 	r = cac_find_and_initialize(card, 0);
 	return (r == SC_SUCCESS); /* never match */
@@ -529,6 +516,12 @@ static int cac_init(sc_card_t *card)
 	LOG_FUNC_RETURN(card->ctx, SC_SUCCESS);
 }
 
+static int cac_logout(sc_card_t *card)
+{
+	int index;
+	return cac_find_first_pki_applet(card, &index);
+}
+
 static struct sc_card_operations cac_ops;
 
 static struct sc_card_driver cac1_drv = {
@@ -550,6 +543,7 @@ static struct sc_card_driver * sc_get_driver(void)
 
 	cac_ops.select_file =  cac_select_file; /* need to record object type */
 	cac_ops.read_binary = cac_read_binary;
+	cac_ops.logout = cac_logout;
 
 	return &cac1_drv;
 }
